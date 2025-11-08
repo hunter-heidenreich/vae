@@ -317,6 +317,60 @@ def save_interpolation_figure(
         plt.imshow(img, cmap="gray")
 
 
+def save_interpolation_combined_figure(
+    model: VAE,
+    loader: DataLoader,
+    device: torch.device,
+    out_path: str,
+    steps: int = 15,
+    method: str = "slerp",
+    sweep_steps: int = 15,
+):
+    """Create combined interpolation figure with data interpolation on top and latent sweep on bottom."""
+    # First, get interpolation between two random examples
+    ds = loader.dataset  # type: ignore[attr-defined]
+    ds_sized = cast(Sized, ds)
+    idx = torch.randint(0, len(ds_sized), (2,))
+    x0, _ = ds[idx[0].item()]  # type: ignore[index]
+    x1, _ = ds[idx[1].item()]  # type: ignore[index]
+    x = torch.stack([x0, x1], dim=0).to(device)
+
+    with model_inference(model):
+        # Interpolation between examples
+        mu, _ = model.encode(x)
+        z0, z1 = mu[0], mu[1]
+        t = torch.linspace(0, 1, steps, device=device)
+        zs = _slerp(z0, z1, t) if method.lower() == "slerp" else _lerp(z0, z1, t)
+        interp_imgs = decode_samples(model, zs)
+        
+        # Latent space sweep along first dimension
+        z1_sweep = torch.linspace(-3, 3, sweep_steps, device=device)
+        z_sweep = torch.zeros(sweep_steps, model.latent_dim, device=device)
+        z_sweep[:, 0] = z1_sweep
+        sweep_imgs = decode_samples(model, z_sweep)
+
+    # Create grids
+    interp_grid = grid_from_images(interp_imgs, 1, steps)
+    sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
+    
+    # Create figure with 2 subplots stacked vertically
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(steps, sweep_steps), 3))
+    
+    # Top plot: interpolation between examples
+    ax1.imshow(interp_grid, cmap="gray")
+    ax1.axis("off")
+    ax1.set_title("Interpolation Between Two Data Points", fontsize=10, pad=10)
+    
+    # Bottom plot: latent sweep
+    ax2.imshow(sweep_grid, cmap="gray")
+    ax2.axis("off")
+    ax2.set_title("Latent Space Sweep (z1 dimension)", fontsize=10, pad=10)
+    
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=DEFAULT_DPI)
+    plt.close()
+
+
 def _lerp(a: torch.Tensor, b: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     """Linear interpolation between a and b for any shape along last dim."""
     t_ = t.view(-1, *([1] * a.dim()))

@@ -14,8 +14,7 @@ from tqdm import tqdm
 
 from model import VAE
 from plot import (collect_latents, save_gradient_diagnostics,
-                  save_interpolation_between_examples,
-                  save_interpolation_figure, save_kl_diagnostics_combined,
+                  save_interpolation_combined_figure, save_kl_diagnostics_combined,
                   save_latent_combined_figure, save_latent_marginals,
                   save_recon_figure, save_samples_figure, save_training_curves)
 
@@ -723,14 +722,15 @@ def main():
         n=args.n_samples,
         grid=(8, 8),
     )
-    # Interpolate between two random datapoints regardless of latent dimensionality
-    save_interpolation_between_examples(
+    # Combined interpolation figure (between examples + latent sweep)
+    save_interpolation_combined_figure(
         model,
         test_loader,
         device,
         os.path.join(fig_dir, "interpolation.webp"),
         steps=args.interp_steps,
         method=args.interp_method,
+        sweep_steps=15,
     )
     # Latent space
     Z, Y = collect_latents(
@@ -738,9 +738,6 @@ def main():
     )
     save_latent_combined_figure(Z, Y, os.path.join(fig_dir, "mnist-2d-combined.webp"))
     save_latent_marginals(Z, os.path.join(fig_dir, "mnist-1d-hists.webp"))
-    save_interpolation_figure(
-        model, device, os.path.join(fig_dir, "interpolation.webp"), n=15
-    )
 
     # Loss and grad norm curves (from epoch-level data)
     save_training_curves(
