@@ -74,6 +74,9 @@ def train(
         max_grad_norm (float | None): Maximum gradient norm for clipping. None disables clipping.
         log_interval (int): Log metrics every N steps.
         epoch (int): Current epoch number for history tracking.
+        use_analytic_kl (bool): Whether to use manual analytic KL formula (True) or torch.distributions.kl.kl_divergence (False).
+        use_distributions (bool): Whether to use torch.distributions for sampling.
+        n_latent_samples (int): Number of latent samples per input for ELBO estimation.
     """
     model.train()
 
@@ -109,45 +112,41 @@ def train(
         )
         loss = output.loss
 
-        # Compute gradients for individual loss components and their contributions
-        # First, get reconstruction gradients
-        optimizer.zero_grad()
-        output.loss_recon.backward(retain_graph=True)
-        recon_grads = [
-            p.grad.clone() if p.grad is not None else torch.zeros_like(p)
-            for p in model.parameters()
-        ]
-        recon_grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            model.parameters(), float("inf")
-        ).item()
-
-        # Then get KL gradients
-        optimizer.zero_grad()
-        output.loss_kl.backward(retain_graph=True)
-        kl_grads = [
-            p.grad.clone() if p.grad is not None else torch.zeros_like(p)
-            for p in model.parameters()
-        ]
-        kl_grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            model.parameters(), float("inf")
-        ).item()
-
-        # Now compute the total gradient and analyze contributions
+        # Compute gradients for individual loss components using torch.autograd.grad
+        # This is more efficient than multiple backward passes
+        
+        # Get model parameters for gradient computation
+        params = list(model.parameters())
+        
+        # Compute reconstruction gradients
+        recon_grads = torch.autograd.grad(
+            output.loss_recon, params, retain_graph=True, create_graph=False, allow_unused=True
+        )
+        # Handle None gradients for unused parameters
+        recon_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(recon_grads, params)]
+        recon_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in recon_grads]).sum()
+        recon_grad_norm = torch.sqrt(recon_grad_norm_sq).item()
+        
+        # Compute KL gradients
+        kl_grads = torch.autograd.grad(
+            output.loss_kl, params, retain_graph=True, create_graph=False, allow_unused=True
+        )
+        # Handle None gradients for unused parameters
+        kl_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(kl_grads, params)]
+        kl_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in kl_grads]).sum()
+        kl_grad_norm = torch.sqrt(kl_grad_norm_sq).item()
+        
+        # Compute total gradients
         optimizer.zero_grad()
         loss.backward()
-
-        # First, get the UNCLIPPED total norm manually
-        unclipped_grad_norm = 0.0
-        for p in model.parameters():
-            if p.grad is not None:
-                unclipped_grad_norm += p.grad.data.norm(2).item() ** 2
-        unclipped_grad_norm = unclipped_grad_norm**0.5
-
-        # Clone the unclipped total grads for analysis (BEFORE clipping)
+        
+        # Get the UNCLIPPED total norm and gradients
         total_grads_unclipped = [
             p.grad.clone() if p.grad is not None else torch.zeros_like(p)
             for p in model.parameters()
         ]
+        unclipped_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in total_grads_unclipped]).sum()
+        unclipped_grad_norm = torch.sqrt(unclipped_grad_norm_sq).item()
 
         # Now apply clipping and get the realized norm
         if max_grad_norm is not None:
@@ -312,6 +311,9 @@ def test(
         writer: The TensorBoard writer.
         history: Dictionary to store test history.
         epoch (int): Current epoch number for history tracking.
+        use_analytic_kl (bool): Whether to use manual analytic KL formula (True) or torch.distributions.kl.kl_divergence (False).
+        use_distributions (bool): Whether to use torch.distributions for sampling.
+        n_latent_samples (int): Number of latent samples per input for ELBO estimation.
     """
     model.eval()
     test_loss = 0.0
@@ -341,8 +343,9 @@ def test(
             test_recon_loss += output.loss_recon.item()
             test_kl_loss += output.loss_kl.item()
 
-            # Compute KL per dimension
-            mu, logvar = model.encode(data)
+            # Compute KL per dimension using already computed values from forward pass
+            mu = output.mu
+            logvar = 2 * output.std.log()  # logvar = 2 * log(std)
             from plot import compute_kl_per_dimension
 
             kl_per_dim_batch = compute_kl_per_dimension(mu, logvar)
@@ -493,10 +496,10 @@ def parse_args():
 
     # VAE-specific options
     parser.add_argument(
-        "--no-analytic-kl",
+        "--use-torch-kl",
         action="store_true",
         default=False,
-        help="Use Monte Carlo KL instead of analytic formula (default: use analytic)",
+        help="Use torch.distributions.kl.kl_divergence instead of manual analytic formula (default: use manual formula)",
     )
     parser.add_argument(
         "--use-distributions",
@@ -658,7 +661,7 @@ def main():
             max_grad_norm=args.max_grad_norm,
             log_interval=args.log_interval,
             epoch=epoch + 1,
-            use_analytic_kl=not args.no_analytic_kl,
+            use_analytic_kl=not args.use_torch_kl,
             use_distributions=args.use_distributions,
             n_latent_samples=args.n_latent_samples,
         )
@@ -670,7 +673,7 @@ def main():
             writer,
             history=test_history,
             epoch=epoch + 1,
-            use_analytic_kl=not args.no_analytic_kl,
+            use_analytic_kl=not args.use_torch_kl,
             use_distributions=args.use_distributions,
             n_latent_samples=args.n_latent_samples,
         )

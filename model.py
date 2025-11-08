@@ -102,7 +102,7 @@ class VAE(nn.Module):
             x: input tensor shaped (B, 1, 28, 28) or flattened (B, 784)
             compute_loss: whether to compute BCE+KL
             reconstruct: whether to return reconstructed x
-            use_analytic_kl: whether to use analytic KL divergence formula
+            use_analytic_kl: whether to use manual analytic formula (True) or torch.distributions.kl.kl_divergence (False)
             use_distributions: whether to use torch.distributions for sampling
             n_samples: number of samples to draw from latent distribution
         """
@@ -159,12 +159,12 @@ class VAE(nn.Module):
         ) / x.size(0)
 
         if use_analytic_kl:
-            # KL divergence loss using analytic formula
+            # KL divergence loss using manual analytic formula
             loss_kl = (
                 0.5 * torch.sum(mu.pow(2) + log_var.exp() - 1 - log_var, dim=1).mean()
             )
         else:
-            # KL divergence loss using torch.distributions
+            # KL divergence loss using torch.distributions.kl.kl_divergence (also analytic)
             std = torch.exp(0.5 * log_var)
             prior = torch.distributions.Normal(
                 torch.zeros_like(mu), torch.ones_like(std)
