@@ -13,10 +13,10 @@ from torchvision.transforms import v2 as T
 from tqdm import tqdm
 
 from model import VAE
-from plot import (collect_latents, save_gradient_diagnostics,
-                  save_interpolation_combined_figure, save_kl_diagnostics_combined,
-                  save_latent_combined_figure, save_latent_marginals,
-                  save_recon_figure, save_samples_figure, save_training_curves)
+from plotting import (collect_latents, save_gradient_diagnostics,
+                      save_interpolation_combined_figure, save_kl_diagnostics_combined,
+                      save_latent_combined_figure, save_latent_marginals,
+                      save_recon_figure, save_samples_figure, save_training_curves)
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -369,7 +369,7 @@ def test(
             # Compute KL per dimension using already computed values from forward pass
             mu = output.mu
             logvar = 2 * output.std.log()  # logvar = 2 * log(std)
-            from plot import compute_kl_per_dimension
+            from plotting import compute_kl_per_dimension
 
             kl_per_dim_batch = compute_kl_per_dimension(mu, logvar)
 
