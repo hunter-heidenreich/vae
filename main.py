@@ -59,6 +59,7 @@ def train(
     use_analytic_kl: bool = True,
     use_distributions: bool = False,
     n_latent_samples: int = 1,
+    analyze_gradients: bool = True,
 ):
     """
     Trains the model on the given data.
@@ -77,6 +78,7 @@ def train(
         use_analytic_kl (bool): Whether to use manual analytic KL formula (True) or torch.distributions.kl.kl_divergence (False).
         use_distributions (bool): Whether to use torch.distributions for sampling.
         n_latent_samples (int): Number of latent samples per input for ELBO estimation.
+        analyze_gradients (bool): Whether to compute detailed gradient diagnostics (slower but more informative).
     """
     model.train()
 
@@ -86,13 +88,17 @@ def train(
     epoch_kl_loss = 0.0
     epoch_grad_norm = 0.0  # This will be the realized (clipped) norm
     epoch_unclipped_grad_norm = 0.0  # Track unclipped norm separately
-    epoch_recon_grad_norm = 0.0
-    epoch_kl_grad_norm = 0.0
-    epoch_recon_contribution = 0.0
-    epoch_kl_contribution = 0.0
-    epoch_recon_total_cosine = 0.0
-    epoch_kl_total_cosine = 0.0
-    epoch_recon_kl_cosine = 0.0
+    
+    # Only initialize gradient analysis accumulators if needed
+    if analyze_gradients:
+        epoch_recon_grad_norm = 0.0
+        epoch_kl_grad_norm = 0.0
+        epoch_recon_contribution = 0.0
+        epoch_kl_contribution = 0.0
+        epoch_recon_total_cosine = 0.0
+        epoch_kl_total_cosine = 0.0
+        epoch_recon_kl_cosine = 0.0
+    
     n_batches = 0
 
     progress_bar = tqdm(dataloader, desc="Training")
@@ -112,32 +118,41 @@ def train(
         )
         loss = output.loss
 
-        # Compute gradients for individual loss components using torch.autograd.grad
-        # This is more efficient than multiple backward passes
-        
-        # Get model parameters for gradient computation
-        params = list(model.parameters())
-        
-        # Compute reconstruction gradients
-        recon_grads = torch.autograd.grad(
-            output.loss_recon, params, retain_graph=True, create_graph=False, allow_unused=True
-        )
-        # Handle None gradients for unused parameters
-        recon_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(recon_grads, params)]
-        recon_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in recon_grads]).sum()
-        recon_grad_norm = torch.sqrt(recon_grad_norm_sq).item()
-        
-        # Compute KL gradients
-        kl_grads = torch.autograd.grad(
-            output.loss_kl, params, retain_graph=True, create_graph=False, allow_unused=True
-        )
-        # Handle None gradients for unused parameters
-        kl_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(kl_grads, params)]
-        kl_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in kl_grads]).sum()
-        kl_grad_norm = torch.sqrt(kl_grad_norm_sq).item()
-        
-        # Compute total gradients
-        optimizer.zero_grad()
+        # Initialize gradient analysis variables with default values
+        recon_grad_norm = 0.0
+        kl_grad_norm = 0.0
+        recon_contribution = 0.0
+        kl_contribution = 0.0
+        recon_total_cosine = torch.tensor(0.0)
+        kl_total_cosine = torch.tensor(0.0)
+        recon_kl_cosine = torch.tensor(0.0)
+
+        if analyze_gradients:
+            # Compute gradients for individual loss components using torch.autograd.grad
+            # This is more efficient than multiple backward passes but still adds overhead
+            
+            # Get model parameters for gradient computation
+            params = list(model.parameters())
+            
+            # Compute reconstruction gradients
+            recon_grads = torch.autograd.grad(
+                output.loss_recon, params, retain_graph=True, create_graph=False, allow_unused=True
+            )
+            # Handle None gradients for unused parameters
+            recon_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(recon_grads, params)]
+            recon_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in recon_grads]).sum()
+            recon_grad_norm = torch.sqrt(recon_grad_norm_sq).item()
+            
+            # Compute KL gradients
+            kl_grads = torch.autograd.grad(
+                output.loss_kl, params, retain_graph=True, create_graph=False, allow_unused=True
+            )
+            # Handle None gradients for unused parameters
+            kl_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(kl_grads, params)]
+            kl_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in kl_grads]).sum()
+            kl_grad_norm = torch.sqrt(kl_grad_norm_sq).item()
+
+        # Compute total gradients (this is always needed)
         loss.backward()
         
         # Get the UNCLIPPED total norm and gradients
@@ -157,40 +172,41 @@ def train(
         else:
             realized_grad_norm = unclipped_grad_norm
 
-        # Compute gradient contribution metrics using UNCLIPPED gradients for direction analysis
-        recon_total_dot = sum(
-            (rg * tg).sum().item() for rg, tg in zip(recon_grads, total_grads_unclipped)
-        )
-        kl_total_dot = sum(
-            (kg * tg).sum().item() for kg, tg in zip(kl_grads, total_grads_unclipped)
-        )
-        recon_kl_dot = sum(
-            (rg * kg).sum().item() for rg, kg in zip(recon_grads, kl_grads)
-        )
+        if analyze_gradients:
+            # Compute gradient contribution metrics using UNCLIPPED gradients for direction analysis
+            recon_total_dot = sum(
+                (rg * tg).sum().item() for rg, tg in zip(recon_grads, total_grads_unclipped)
+            )
+            kl_total_dot = sum(
+                (kg * tg).sum().item() for kg, tg in zip(kl_grads, total_grads_unclipped)
+            )
+            recon_kl_dot = sum(
+                (rg * kg).sum().item() for rg, kg in zip(recon_grads, kl_grads)
+            )
 
-        # Use the unclipped norm for normalization (direction analysis)
-        total_grad_norm_sq_unclipped = unclipped_grad_norm * unclipped_grad_norm
-        recon_grad_norm_sq = recon_grad_norm * recon_grad_norm
-        kl_grad_norm_sq = kl_grad_norm * kl_grad_norm
+            # Use the unclipped norm for normalization (direction analysis)
+            total_grad_norm_sq_unclipped = unclipped_grad_norm * unclipped_grad_norm
+            recon_grad_norm_sq = recon_grad_norm * recon_grad_norm
+            kl_grad_norm_sq = kl_grad_norm * kl_grad_norm
 
-        # Compute contribution magnitudes (how much each component contributes to total gradient direction)
-        recon_contribution = recon_total_dot / (
-            total_grad_norm_sq_unclipped + 1e-8
-        )  # Normalized contribution
-        kl_contribution = kl_total_dot / (total_grad_norm_sq_unclipped + 1e-8)
+            # Compute contribution magnitudes (how much each component contributes to total gradient direction)
+            recon_contribution = recon_total_dot / (
+                total_grad_norm_sq_unclipped + 1e-8
+            )  # Normalized contribution
+            kl_contribution = kl_total_dot / (total_grad_norm_sq_unclipped + 1e-8)
 
-        # Compute cosine similarity between gradients
-        recon_total_cosine = recon_total_dot / (
-            torch.sqrt(torch.tensor(recon_grad_norm_sq * total_grad_norm_sq_unclipped))
-            + 1e-8
-        )
-        kl_total_cosine = kl_total_dot / (
-            torch.sqrt(torch.tensor(kl_grad_norm_sq * total_grad_norm_sq_unclipped))
-            + 1e-8
-        )
-        recon_kl_cosine = recon_kl_dot / (
-            torch.sqrt(torch.tensor(recon_grad_norm_sq * kl_grad_norm_sq)) + 1e-8
-        )
+            # Compute cosine similarity between gradients
+            recon_total_cosine = recon_total_dot / (
+                torch.sqrt(torch.tensor(recon_grad_norm_sq * total_grad_norm_sq_unclipped))
+                + 1e-8
+            )
+            kl_total_cosine = kl_total_dot / (
+                torch.sqrt(torch.tensor(kl_grad_norm_sq * total_grad_norm_sq_unclipped))
+                + 1e-8
+            )
+            recon_kl_cosine = recon_kl_dot / (
+                torch.sqrt(torch.tensor(recon_grad_norm_sq * kl_grad_norm_sq)) + 1e-8
+            )
 
         optimizer.step()
 
@@ -202,13 +218,16 @@ def train(
         epoch_unclipped_grad_norm += (
             unclipped_grad_norm  # Store unclipped norm for comparison
         )
-        epoch_recon_grad_norm += recon_grad_norm
-        epoch_kl_grad_norm += kl_grad_norm
-        epoch_recon_contribution += recon_contribution
-        epoch_kl_contribution += kl_contribution
-        epoch_recon_total_cosine += recon_total_cosine.item()
-        epoch_kl_total_cosine += kl_total_cosine.item()
-        epoch_recon_kl_cosine += recon_kl_cosine.item()
+        
+        if analyze_gradients:
+            epoch_recon_grad_norm += recon_grad_norm
+            epoch_kl_grad_norm += kl_grad_norm
+            epoch_recon_contribution += recon_contribution
+            epoch_kl_contribution += kl_contribution
+            epoch_recon_total_cosine += recon_total_cosine.item()
+            epoch_kl_total_cosine += kl_total_cosine.item()
+            epoch_recon_kl_cosine += recon_kl_cosine.item()
+        
         n_batches += 1
 
         # Update progress bar
@@ -235,23 +254,25 @@ def train(
                 writer.add_scalar(
                     "GradNorm/Train/Unclipped", unclipped_grad_norm, global_step
                 )
-                writer.add_scalar("GradNorm/Train/Recon", recon_grad_norm, global_step)
-                writer.add_scalar("GradNorm/Train/KL", kl_grad_norm, global_step)
-                writer.add_scalar(
-                    "GradContrib/Train/Recon", recon_contribution, global_step
-                )
-                writer.add_scalar("GradContrib/Train/KL", kl_contribution, global_step)
-                writer.add_scalar(
-                    "GradCosine/Train/Recon_Total",
-                    recon_total_cosine.item(),
-                    global_step,
-                )
-                writer.add_scalar(
-                    "GradCosine/Train/KL_Total", kl_total_cosine.item(), global_step
-                )
-                writer.add_scalar(
-                    "GradCosine/Train/Recon_KL", recon_kl_cosine.item(), global_step
-                )
+                
+                if analyze_gradients:
+                    writer.add_scalar("GradNorm/Train/Recon", recon_grad_norm, global_step)
+                    writer.add_scalar("GradNorm/Train/KL", kl_grad_norm, global_step)
+                    writer.add_scalar(
+                        "GradContrib/Train/Recon", recon_contribution, global_step
+                    )
+                    writer.add_scalar("GradContrib/Train/KL", kl_contribution, global_step)
+                    writer.add_scalar(
+                        "GradCosine/Train/Recon_Total",
+                        recon_total_cosine.item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "GradCosine/Train/KL_Total", kl_total_cosine.item(), global_step
+                    )
+                    writer.add_scalar(
+                        "GradCosine/Train/Recon_KL", recon_kl_cosine.item(), global_step
+                    )
 
     # Record epoch-level averages
     if history is not None and n_batches > 0:
@@ -265,25 +286,27 @@ def train(
         history.setdefault("grad_norm_unclipped", []).append(
             epoch_unclipped_grad_norm / n_batches
         )  # Added
-        history.setdefault("recon_grad_norm", []).append(
-            epoch_recon_grad_norm / n_batches
-        )  # Renamed for clarity
-        history.setdefault("kl_grad_norm", []).append(
-            epoch_kl_grad_norm / n_batches
-        )  # Renamed for clarity
-        history.setdefault("recon_contrib", []).append(
-            epoch_recon_contribution / n_batches
-        )
-        history.setdefault("kl_contrib", []).append(epoch_kl_contribution / n_batches)
-        history.setdefault("recon_total_cosine", []).append(
-            epoch_recon_total_cosine / n_batches
-        )
-        history.setdefault("kl_total_cosine", []).append(
-            epoch_kl_total_cosine / n_batches
-        )
-        history.setdefault("recon_kl_cosine", []).append(
-            epoch_recon_kl_cosine / n_batches
-        )
+        
+        if analyze_gradients:
+            history.setdefault("recon_grad_norm", []).append(
+                epoch_recon_grad_norm / n_batches
+            )  # Renamed for clarity
+            history.setdefault("kl_grad_norm", []).append(
+                epoch_kl_grad_norm / n_batches
+            )  # Renamed for clarity
+            history.setdefault("recon_contrib", []).append(
+                epoch_recon_contribution / n_batches
+            )
+            history.setdefault("kl_contrib", []).append(epoch_kl_contribution / n_batches)
+            history.setdefault("recon_total_cosine", []).append(
+                epoch_recon_total_cosine / n_batches
+            )
+            history.setdefault("kl_total_cosine", []).append(
+                epoch_kl_total_cosine / n_batches
+            )
+            history.setdefault("recon_kl_cosine", []).append(
+                epoch_recon_kl_cosine / n_batches
+            )
 
     return prev_updates + len(dataloader)
 
@@ -528,6 +551,14 @@ def parse_args():
         help="Save checkpoint every N epochs (default: 5)",
     )
 
+    # Performance and analysis options
+    parser.add_argument(
+        "--analyze-gradients",
+        action="store_true",
+        default=False,
+        help="Enable detailed gradient analysis (slower but provides gradient diagnostics)",
+    )
+
     # Evaluation and visualization
     parser.add_argument(
         "--max-latent-batches",
@@ -664,6 +695,7 @@ def main():
             use_analytic_kl=not args.use_torch_kl,
             use_distributions=args.use_distributions,
             n_latent_samples=args.n_latent_samples,
+            analyze_gradients=args.analyze_gradients,
         )
         val_loss = test(
             model,
@@ -746,10 +778,11 @@ def main():
     save_training_curves(
         train_history, test_history, os.path.join(fig_dir, "losses.webp")
     )
-    # Unified gradient diagnostics plot
-    save_gradient_diagnostics(
-        train_history, os.path.join(fig_dir, "grad-diagnostics.webp")
-    )
+    # Unified gradient diagnostics plot (only if gradient analysis was enabled)
+    if args.analyze_gradients:
+        save_gradient_diagnostics(
+            train_history, os.path.join(fig_dir, "grad-diagnostics.webp")
+        )
 
     # KL per dimension diagnostics (the "Next Level" plot)
     save_kl_diagnostics_combined(
