@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Core project files 
+runs/
+benchmark_results.csv

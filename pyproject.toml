@@ -1,7 +1,7 @@
 [project]
 name = "mnist-vae"
 version = "0.1.0"
-description = "Modern PyTorch VAE implementation for MNIST with numerical stability and clean architecture"
+description = "Modern PyTorch VAE implementation"
 readme = "README.md"
 requires-python = ">=3.8,<3.13"
 dependencies = [
