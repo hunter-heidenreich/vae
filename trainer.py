@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
 from plotting import (collect_latents, compute_kl_per_dimension,
                       save_gradient_diagnostics,
@@ -21,6 +22,11 @@ from plotting import (collect_latents, compute_kl_per_dimension,
                       save_recon_figure, save_samples_figure,
                       save_training_curves)
 from trainer_config import TrainerConfig
+
+# Analysis and formatting constants
+ACTIVE_UNIT_KL_THRESHOLD = 0.1
+DEFAULT_INTERPOLATION_SWEEP_STEPS = 15
+DEFAULT_SAMPLES_GRID_SIZE = (8, 8)
 
 
 class VAETrainer:
@@ -73,8 +79,7 @@ class VAETrainer:
 
         # Training state
         self.global_step = 0
-        self.train_history = {}
-        self.val_history = {}
+        self.history = TrainingHistory()
 
         print("VAE Trainer initialized:")
         print(f"  Device: {self.device}")
@@ -86,21 +91,18 @@ class VAETrainer:
         if self.config.device == "auto":
             if torch.cuda.is_available():
                 return torch.device("cuda")
-            else:
-                mps_available = False
-                try:
-                    _backends = getattr(torch, "backends", None)
-                    _mps = (
-                        getattr(_backends, "mps", None)
-                        if _backends is not None
-                        else None
-                    )
-                    mps_available = (
-                        bool(_mps.is_available()) if _mps is not None else False
-                    )
-                except Exception:
-                    mps_available = False
-                return torch.device("mps") if mps_available else torch.device("cpu")
+
+            # Check for MPS (Apple Silicon) availability
+            try:
+                backends = getattr(torch, "backends", None)
+                if backends is not None:
+                    mps = getattr(backends, "mps", None)
+                    if mps is not None and mps.is_available():
+                        return torch.device("mps")
+            except Exception:
+                pass  # Fall back to CPU if MPS check fails
+
+            return torch.device("cpu")
         else:
             return torch.device(self.config.device)
 
@@ -112,6 +114,12 @@ class VAETrainer:
     def _count_parameters(self) -> int:
         """Count trainable parameters in the model."""
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+
+    def _compute_grad_norm(self, gradients: list[torch.Tensor]) -> float:
+        """Compute L2 norm of a list of gradients."""
+        return torch.sqrt(
+            torch.stack([g.norm(2).pow(2) for g in gradients]).sum()
+        ).item()
 
     def train_epoch(self, dataloader: DataLoader, epoch: int) -> int:
         """
@@ -126,93 +134,88 @@ class VAETrainer:
         """
         self.model.train()
 
-        # Accumulators for epoch-level metrics
-        epoch_metrics = {
-            "loss": 0.0,
-            "recon": 0.0,
-            "kl": 0.0,
-            "grad_norm_realized": 0.0,
-            "grad_norm_unclipped": 0.0,
-        }
-
-        # Gradient analysis accumulators (only if enabled)
-        if self.config.analyze_gradients:
-            grad_metrics = {
-                "recon_grad_norm": 0.0,
-                "kl_grad_norm": 0.0,
-                "recon_kl_cosine": 0.0,
-                "recon_contrib": 0.0,
-                "kl_contrib": 0.0,
-            }
-            epoch_metrics.update(grad_metrics)
-
-        n_batches = 0
-        steps_this_epoch = 0
+        # Initialize metrics accumulator
+        metrics_accumulator = MetricsAccumulator(self.config.analyze_gradients)
 
         progress_bar = tqdm(dataloader, desc=f"Training Epoch {epoch}")
 
         for _, (data, _) in enumerate(progress_bar):
-            data = data.to(self.device)
+            # Execute single training step and collect metrics
+            step_metrics = self._train_step(data)
 
-            # Forward pass
-            self.optimizer.zero_grad()
-            output = self.model(
-                data,
-                compute_loss=True,
-                reconstruct=False,
-            )
+            # Accumulate metrics
+            metrics_accumulator.add_step(step_metrics)
 
-            # Gradient analysis (if enabled)
-            step_grad_metrics = {}
-            if self.config.analyze_gradients:
-                step_grad_metrics = self._compute_gradient_metrics(output)
-
-            # Backward pass
-            output.loss.backward()
-
-            # Gradient norms and clipping
-            grad_norms = self._handle_gradient_clipping()
-
-            # Optimizer step
-            self.optimizer.step()
-
-            # Update metrics (cache .item() calls)
-            loss_item = output.loss.item()
-            recon_item = output.loss_recon.item()
-            kl_item = output.loss_kl.item()
-
-            epoch_metrics["loss"] += loss_item
-            epoch_metrics["recon"] += recon_item
-            epoch_metrics["kl"] += kl_item
-            epoch_metrics["grad_norm_realized"] += grad_norms["realized"]
-            epoch_metrics["grad_norm_unclipped"] += grad_norms["unclipped"]
-
-            # Add gradient metrics if enabled
-            for key, value in step_grad_metrics.items():
-                epoch_metrics[key] += value
-
-            n_batches += 1
-            steps_this_epoch += 1
             self.global_step += 1
 
-            # Update progress bar
+            # Update progress bar with latest metrics
+            latest_metrics = metrics_accumulator.get_latest()
             progress_bar.set_postfix(
                 {
-                    "Loss": f"{loss_item:.3f}",
-                    "Recon": f"{recon_item:.3f}",
-                    "KL": f"{kl_item:.3f}",
-                    "GNorm": f"{grad_norms['realized']:.2f}",
+                    "Loss": f"{latest_metrics.get('loss', 0):.3f}",
+                    "Recon": f"{latest_metrics.get('recon', 0):.3f}",
+                    "KL": f"{latest_metrics.get('kl', 0):.3f}",
+                    "GNorm": f"{latest_metrics.get('grad_norm_realized', 0):.2f}",
                 }
             )
 
             # Logging
             if self.global_step % self.config.log_interval == 0:
-                self._log_training_step(output, grad_norms, step_grad_metrics)
+                self._log_training_step_from_metrics(step_metrics)
 
         # Record epoch-level averages
-        self._record_epoch_metrics(epoch_metrics, n_batches, epoch, is_train=True)
+        epoch_averages = metrics_accumulator.get_averages()
+        self.history.record_epoch_metrics(epoch_averages, epoch, is_train=True)
 
-        return steps_this_epoch
+        return metrics_accumulator.get_count()
+
+    def _train_step(self, data: torch.Tensor) -> dict[str, float]:
+        """
+        Execute a single training step and return metrics.
+
+        Args:
+            data: Input batch data
+
+        Returns:
+            Dictionary of step metrics
+        """
+        data = data.to(self.device)
+
+        # Forward pass
+        self.optimizer.zero_grad()
+        output = self.model(
+            data,
+            compute_loss=True,
+            reconstruct=False,
+        )
+
+        # Gradient analysis (if enabled)
+        step_grad_metrics = {}
+        if self.config.analyze_gradients:
+            step_grad_metrics = self._compute_gradient_metrics(output)
+
+        # Backward pass
+        output.loss.backward()
+
+        # Gradient norms and clipping
+        grad_norms = self._handle_gradient_clipping()
+
+        # Optimizer step
+        self.optimizer.step()
+
+        # Collect all step metrics
+        step_metrics = {
+            "loss": output.loss.item(),
+            "recon": output.loss_recon.item(),
+            "kl": output.loss_kl.item(),
+            "grad_norm_realized": grad_norms["realized"],
+            "grad_norm_unclipped": grad_norms["unclipped"],
+        }
+
+        # Add gradient analysis metrics if enabled
+        step_metrics.update(step_grad_metrics)
+
+        return step_metrics
 
     def validate(self, dataloader: DataLoader, epoch: int) -> float:
         """
@@ -227,11 +230,8 @@ class VAETrainer:
         """
         self.model.eval()
 
-        val_metrics = {
-            "loss": 0.0,
-            "recon": 0.0,
-            "kl": 0.0,
-        }
+        # Initialize metrics accumulator (no gradient analysis for validation)
+        metrics_accumulator = MetricsAccumulator(enable_gradient_analysis=False)
 
         # For KL per dimension computation
         kl_per_dim_accum = None
@@ -244,9 +244,13 @@ class VAETrainer:
                     compute_loss=True,
                 )
 
-                val_metrics["loss"] += output.loss.item()
-                val_metrics["recon"] += output.loss_recon.item()
-                val_metrics["kl"] += output.loss_kl.item()
+                # Collect step metrics
+                step_metrics = {
+                    "loss": output.loss.item(),
+                    "recon": output.loss_recon.item(),
+                    "kl": output.loss_kl.item(),
+                }
+                metrics_accumulator.add_step(step_metrics)
 
                 # Compute KL per dimension
                 mu = output.mu
@@ -258,10 +262,9 @@ class VAETrainer:
                 else:
                     kl_per_dim_accum += kl_per_dim_batch
 
-        # Compute averages
-        n_batches = len(dataloader)
-        for key in val_metrics:
-            val_metrics[key] /= n_batches
+        # Get averaged metrics
+        val_metrics = metrics_accumulator.get_averages()
+        n_batches = metrics_accumulator.get_count()
 
         # Average KL per dimension
         kl_per_dim_avg = []
@@ -274,15 +277,15 @@ class VAETrainer:
             f"(BCE: {val_metrics['recon']:.4f}, KLD: {val_metrics['kl']:.4f})"
         )
 
-        active_count = sum(1 for kl in kl_per_dim_avg if kl >= 0.1)
+        active_count = sum(1 for kl in kl_per_dim_avg if kl >= ACTIVE_UNIT_KL_THRESHOLD)
         print(
-            f"====> Active units: {active_count}/{len(kl_per_dim_avg)} (threshold=0.1)"
+            f"====> Active units: {active_count}/{len(kl_per_dim_avg)} (threshold={ACTIVE_UNIT_KL_THRESHOLD})"
         )
 
         # Record validation history
-        self._record_epoch_metrics(val_metrics, 1, epoch, is_train=False)
+        self.history.record_epoch_metrics(val_metrics, epoch, is_train=False)
         # Add kl_per_dim separately since it's a different type
-        self.val_history.setdefault("kl_per_dim", []).append(kl_per_dim_avg)
+        self.history.val_history.setdefault("kl_per_dim", []).append(kl_per_dim_avg)
 
         # TensorBoard logging
         self._log_validation_step(val_metrics)
@@ -321,7 +324,8 @@ class VAETrainer:
                 self.save_checkpoint(
                     epoch=epoch + 1,
                     filepath=os.path.join(
-                        self.ckpt_dir, f"checkpoint_epoch_{epoch + 1:03d}.pt"
+                        self.ckpt_dir,
+                        f"checkpoint_epoch_{epoch + 1:03d}.pt",
                     ),
                 )
 
@@ -363,7 +367,7 @@ class VAETrainer:
             self.model.config.latent_dim,
             os.path.join(self.fig_dir, "samples.webp"),
             n=self.config.n_samples,
-            grid=(8, 8),
+            grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
 
         # Combined interpolation figure (between examples + latent sweep)
@@ -374,7 +378,7 @@ class VAETrainer:
             os.path.join(self.fig_dir, "interpolation.webp"),
             steps=self.config.interp_steps,
             method=self.config.interp_method,
-            sweep_steps=15,
+            sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
         )
 
         # Latent space analysis
@@ -391,20 +395,22 @@ class VAETrainer:
 
         # Training curves
         save_training_curves(
-            self.train_history,
-            self.val_history,
+            self.history.get_train_history(),
+            self.history.get_val_history(),
             os.path.join(self.fig_dir, "losses.webp"),
         )
 
         # Gradient diagnostics (only if gradient analysis was enabled)
         if self.config.analyze_gradients:
             save_gradient_diagnostics(
-                self.train_history, os.path.join(self.fig_dir, "grad-diagnostics.webp")
+                self.history.get_train_history(),
+                os.path.join(self.fig_dir, "grad-diagnostics.webp"),
             )
 
         # KL per dimension diagnostics
         save_kl_diagnostics_combined(
-            self.val_history, os.path.join(self.fig_dir, "kl-diagnostics-combined.webp")
+            self.history.get_val_history(),
+            os.path.join(self.fig_dir, "kl-diagnostics-combined.webp"),
         )
 
         print(f"Analysis plots saved to {self.fig_dir}")
@@ -433,9 +439,7 @@ class VAETrainer:
             g if g is not None else torch.zeros_like(p)
             for g, p in zip(recon_grads, params)
         ]
-        recon_grad_norm = torch.sqrt(
-            torch.stack([g.norm(2).pow(2) for g in recon_grads]).sum()
-        ).item()
+        recon_grad_norm = self._compute_grad_norm(recon_grads)
 
         # Compute KL gradients
         kl_grads = torch.autograd.grad(
@@ -449,9 +453,7 @@ class VAETrainer:
             g if g is not None else torch.zeros_like(p)
             for g, p in zip(kl_grads, params)
         ]
-        kl_grad_norm = torch.sqrt(
-            torch.stack([g.norm(2).pow(2) for g in kl_grads]).sum()
-        ).item()
+        kl_grad_norm = self._compute_grad_norm(kl_grads)
 
         # Compute cosine similarity between recon and KL gradients
         recon_kl_cosine = 0.0
@@ -492,9 +494,7 @@ class VAETrainer:
             p.grad.clone() if p.grad is not None else torch.zeros_like(p)
             for p in self.model.parameters()
         ]
-        unclipped_grad_norm = torch.sqrt(
-            torch.stack([g.norm(2).pow(2) for g in total_grads_unclipped]).sum()
-        ).item()
+        unclipped_grad_norm = self._compute_grad_norm(total_grads_unclipped)
 
         # Apply clipping if specified
         if self.config.max_grad_norm is not None:
@@ -508,47 +508,37 @@ class VAETrainer:
             "unclipped": unclipped_grad_norm,
         }
 
-    def _log_training_step(
-        self, output, grad_norms: dict[str, float], grad_metrics: dict[str, float]
-    ):
-        """Log training step metrics to TensorBoard."""
-        step = self.global_step
-        self.writer.add_scalar("Loss/Train", output.loss.item(), step)
-        self.writer.add_scalar("Loss/Train/BCE", output.loss_recon.item(), step)
-        self.writer.add_scalar("Loss/Train/KLD", output.loss_kl.item(), step)
-        self.writer.add_scalar("GradNorm/Train/Realized", grad_norms["realized"], step)
-        self.writer.add_scalar(
-            "GradNorm/Train/Unclipped", grad_norms["unclipped"], step
-        )
+    def _log_training_step_from_metrics(self, step_metrics: dict[str, float]):
+        """Log training step metrics to TensorBoard from metrics dictionary."""
+        # Combined mappings for cleaner code
+        all_mappings = {
+            "loss": "Loss/Train",
+            "recon": "Loss/Train/BCE", 
+            "kl": "Loss/Train/KLD",
+            "grad_norm_realized": "GradNorm/Train/Realized",
+            "grad_norm_unclipped": "GradNorm/Train/Unclipped",
+            "recon_grad_norm": "GradNorm/Train/Recon",
+            "kl_grad_norm": "GradNorm/Train/Kl",
+            "recon_kl_cosine": "GradAlignment/Train/ReconKlCosine",
+            "recon_contrib": "GradContribution/Train/Recon",
+            "kl_contrib": "GradContribution/Train/Kl",
+        }
+        
+        for metric_key, tb_name in all_mappings.items():
+            if metric_key in step_metrics:
+                self.writer.add_scalar(tb_name, step_metrics[metric_key], self.global_step)
 
-        for key, value in grad_metrics.items():
-            category = key.split("_")[0]  # recon, kl
-            metric_name = "_".join(key.split("_")[1:])  # grad_norm, contribution, etc.
-            self.writer.add_scalar(
-                f"Grad{metric_name.title()}/Train/{category.title()}", value, step
-            )
-
-    def _log_validation_step(self, val_metrics: dict[str, Any]):
+    def _log_validation_step(self, val_metrics: dict[str, float]):
         """Log validation step metrics to TensorBoard."""
-        step = self.global_step
-        self.writer.add_scalar("Loss/Test", val_metrics["loss"], step)
-        self.writer.add_scalar("Loss/Test/BCE", val_metrics["recon"], step)
-        self.writer.add_scalar("Loss/Test/KLD", val_metrics["kl"], step)
+        val_mappings = {
+            "loss": "Loss/Test",
+            "recon": "Loss/Test/BCE",
+            "kl": "Loss/Test/KLD",
+        }
 
-    def _record_epoch_metrics(
-        self, metrics: dict[str, Any], n_batches: int, epoch: int, is_train: bool
-    ):
-        """Record epoch-level metrics in history."""
-        history = self.train_history if is_train else self.val_history
-
-        history.setdefault("epoch", []).append(epoch)
-
-        for key, value in metrics.items():
-            if key == "kl_per_dim":  # Special handling for list values
-                history.setdefault(key, []).append(value)
-            else:  # Numeric values - compute average
-                avg_value = value / n_batches
-                history.setdefault(key, []).append(avg_value)
+        for metric_key, tb_name in val_mappings.items():
+            if metric_key in val_metrics:
+                self.writer.add_scalar(tb_name, val_metrics[metric_key], self.global_step)
 
     def save_checkpoint(self, epoch: int, filepath: str, is_best: bool = False):
         """
@@ -564,8 +554,8 @@ class VAETrainer:
             "global_step": self.global_step,
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
-            "train_history": self.train_history,
-            "val_history": self.val_history,
+            "train_history": self.history.get_train_history(),
+            "val_history": self.history.get_val_history(),
             "config": self.config,
             "is_best": is_best,
         }
@@ -589,8 +579,12 @@ class VAETrainer:
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.global_step = checkpoint.get("global_step", 0)
-        self.train_history = checkpoint.get("train_history", {})
-        self.val_history = checkpoint.get("val_history", {})
+
+        # Load history into the TrainingHistory object
+        train_history = checkpoint.get("train_history", {})
+        val_history = checkpoint.get("val_history", {})
+        self.history.train_history = train_history
+        self.history.val_history = val_history
 
         return checkpoint
 
@@ -601,8 +595,8 @@ class VAETrainer:
 
     def get_train_history(self) -> dict[str, Any]:
         """Get training history."""
-        return self.train_history.copy()
+        return self.history.get_train_history()
 
     def get_val_history(self) -> dict[str, Any]:
         """Get validation history."""
-        return self.val_history.copy()
+        return self.history.get_val_history()

@@ -1,7 +1,3 @@
-"""
-Simplified main script using VAETrainer.
-"""
-
 import argparse
 import os
 
