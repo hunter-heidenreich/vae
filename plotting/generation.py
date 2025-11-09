@@ -1,12 +1,13 @@
 """Image generation and sampling plots."""
 
-from typing import Sized, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Sized, cast
 
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
-from .core import model_inference, figure_context, decode_samples, grid_from_images
+from .core import (decode_samples, figure_context, grid_from_images,
+                   model_inference)
 
 if TYPE_CHECKING:
     from model import VAE
@@ -81,7 +82,7 @@ def save_interpolation_combined_figure(
         t = torch.linspace(0, 1, steps, device=device)
         zs = _slerp(z0, z1, t) if method.lower() == "slerp" else _lerp(z0, z1, t)
         interp_imgs = decode_samples(model, zs)
-        
+
         # Latent space sweep along first dimension
         z1_sweep = torch.linspace(-3, 3, sweep_steps, device=device)
         z_sweep = torch.zeros(sweep_steps, model.latent_dim, device=device)
@@ -91,20 +92,20 @@ def save_interpolation_combined_figure(
     # Create grids
     interp_grid = grid_from_images(interp_imgs, 1, steps)
     sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
-    
+
     # Create figure with 2 subplots stacked vertically
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(steps, sweep_steps), 3))
-    
+
     # Top plot: interpolation between examples
     ax1.imshow(interp_grid, cmap="gray")
     ax1.axis("off")
     ax1.set_title("Interpolation Between Two Data Points", fontsize=10, pad=10)
-    
+
     # Bottom plot: latent sweep
     ax2.imshow(sweep_grid, cmap="gray")
     ax2.axis("off")
     ax2.set_title("Latent Space Sweep (z1 dimension)", fontsize=10, pad=10)
-    
+
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()

@@ -114,7 +114,7 @@ def save_gradient_diagnostics(train_history: dict, out_path: str):
     required_keys = [
         "epoch",
         "recon_grad_norm",
-        "kl_grad_norm", 
+        "kl_grad_norm",
         "grad_norm_realized",
         "grad_norm_unclipped",
         "recon_kl_cosine",
@@ -146,7 +146,9 @@ def save_gradient_diagnostics(train_history: dict, out_path: str):
     fig.suptitle("Gradient Diagnostics", fontsize=16)
 
     # --- 1. Top-Left: Gradient Norms ---
-    _plot_gradient_norms(axs[0, 0], epochs, recon_norm, kl_norm, realized_norm, unclipped_norm)
+    _plot_gradient_norms(
+        axs[0, 0], epochs, recon_norm, kl_norm, realized_norm, unclipped_norm
+    )
 
     # --- 2. Top-Right: Gradient Alignment (Interference) ---
     _plot_gradient_alignment(axs[0, 1], epochs, recon_kl_cosine)
@@ -155,7 +157,9 @@ def save_gradient_diagnostics(train_history: dict, out_path: str):
     _plot_gradient_contributions(axs[1, 0], epochs, recon_contrib, kl_contrib)
 
     # --- 4. Bottom-Right: Effective Realized Magnitudes ---
-    _plot_effective_magnitudes(axs[1, 1], epochs, realized_norm, recon_contrib, kl_contrib)
+    _plot_effective_magnitudes(
+        axs[1, 1], epochs, realized_norm, recon_contrib, kl_contrib
+    )
 
     # --- Save ---
     plt.tight_layout(rect=(0, 0.03, 1, 0.96))  # Adjust for suptitle
@@ -216,6 +220,7 @@ def save_kl_diagnostics_combined(
 
 
 # Helper functions for cleaner code organization
+
 
 def _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr):
     """Plot loss scatter subplot."""
@@ -293,12 +298,22 @@ def _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr):
         ax.legend(loc="upper right", framealpha=0.9)
 
 
-def _plot_gradient_norms(ax, epochs, recon_norm, kl_norm, realized_norm, unclipped_norm):
+def _plot_gradient_norms(
+    ax, epochs, recon_norm, kl_norm, realized_norm, unclipped_norm
+):
     """Plot gradient norms subplot."""
     ax.plot(
-        epochs, recon_norm, "-o", label="Recon Norm", markersize=3, alpha=0.8, color="blue"
+        epochs,
+        recon_norm,
+        "-o",
+        label="Recon Norm",
+        markersize=3,
+        alpha=0.8,
+        color="blue",
     )
-    ax.plot(epochs, kl_norm, "-s", label="KL Norm", markersize=3, alpha=0.8, color="red")
+    ax.plot(
+        epochs, kl_norm, "-s", label="KL Norm", markersize=3, alpha=0.8, color="red"
+    )
     ax.plot(
         epochs,
         realized_norm,
@@ -311,7 +326,12 @@ def _plot_gradient_norms(ax, epochs, recon_norm, kl_norm, realized_norm, unclipp
     # Show unclipped norm only if it's different from realized (i.e., clipping happened)
     if np.any(unclipped_norm != realized_norm):
         ax.plot(
-            epochs, unclipped_norm, "--", label="Unclipped Total Norm", alpha=0.5, color="gray"
+            epochs,
+            unclipped_norm,
+            "--",
+            label="Unclipped Total Norm",
+            alpha=0.5,
+            color="gray",
         )
     ax.set_title("Gradient L2 Norms")
     ax.set_xlabel("Epoch")
@@ -324,11 +344,20 @@ def _plot_gradient_norms(ax, epochs, recon_norm, kl_norm, realized_norm, unclipp
 def _plot_gradient_alignment(ax, epochs, recon_kl_cosine):
     """Plot gradient alignment subplot."""
     ax.plot(
-        epochs, recon_kl_cosine, "-d", label="Recon vs KL Cosine", markersize=3, color="purple"
+        epochs,
+        recon_kl_cosine,
+        "-d",
+        label="Recon vs KL Cosine",
+        markersize=3,
+        color="purple",
     )
     ax.axhline(y=0, color="gray", linestyle="-", alpha=0.7, label="Orthogonal")
     ax.axhline(
-        y=-1, color="gray", linestyle="--", alpha=0.7, label="Opposite (Max Interference)"
+        y=-1,
+        color="gray",
+        linestyle="--",
+        alpha=0.7,
+        label="Opposite (Max Interference)",
     )
     ax.axhline(y=1, color="gray", linestyle="--", alpha=0.7, label="Aligned")
     ax.set_title("Gradient Alignment (Interference)")
@@ -342,10 +371,22 @@ def _plot_gradient_alignment(ax, epochs, recon_kl_cosine):
 def _plot_gradient_contributions(ax, epochs, recon_contrib, kl_contrib):
     """Plot gradient contributions subplot."""
     ax.plot(
-        epochs, recon_contrib, "-o", label="Recon Contribution", markersize=3, alpha=0.8, color="blue"
+        epochs,
+        recon_contrib,
+        "-o",
+        label="Recon Contribution",
+        markersize=3,
+        alpha=0.8,
+        color="blue",
     )
     ax.plot(
-        epochs, kl_contrib, "-s", label="KL Contribution", markersize=3, alpha=0.8, color="red"
+        epochs,
+        kl_contrib,
+        "-s",
+        label="KL Contribution",
+        markersize=3,
+        alpha=0.8,
+        color="red",
     )
     ax.axhline(y=0.5, color="gray", linestyle="--", alpha=0.7, label="Balanced")
     ax.axhline(y=1.0, color="black", linestyle="-", alpha=0.5)
@@ -362,10 +403,22 @@ def _plot_effective_magnitudes(ax, epochs, realized_norm, recon_contrib, kl_cont
     effective_recon = realized_norm * recon_contrib
     effective_kl = realized_norm * kl_contrib
     ax.plot(
-        epochs, effective_recon, "-o", label="Effective Recon", markersize=3, alpha=0.8, color="blue"
+        epochs,
+        effective_recon,
+        "-o",
+        label="Effective Recon",
+        markersize=3,
+        alpha=0.8,
+        color="blue",
     )
     ax.plot(
-        epochs, effective_kl, "-s", label="Effective KL", markersize=3, alpha=0.8, color="red"
+        epochs,
+        effective_kl,
+        "-s",
+        label="Effective KL",
+        markersize=3,
+        alpha=0.8,
+        color="red",
     )
     ax.set_title("Effective Realized Gradient Magnitudes")
     ax.set_xlabel("Epoch")
@@ -374,13 +427,24 @@ def _plot_effective_magnitudes(ax, epochs, realized_norm, recon_contrib, kl_cont
     ax.grid(True, alpha=0.3)
 
 
-def _plot_kl_bar_chart(fig, kl_matrix, latest_kl_per_dim, active_threshold, subplot_idx):
+def _plot_kl_bar_chart(
+    fig, kl_matrix, latest_kl_per_dim, active_threshold, subplot_idx
+):
     """Plot KL per dimension bar chart."""
     latent_dim = kl_matrix.shape[1]
     ax = plt.subplot(2, 3, subplot_idx)
     dims = np.arange(latent_dim)
-    colors = ["red" if kl < active_threshold else "steelblue" for kl in latest_kl_per_dim]
-    bars = ax.bar(dims, latest_kl_per_dim, color=colors, alpha=0.8, edgecolor="black", linewidth=0.5)
+    colors = [
+        "red" if kl < active_threshold else "steelblue" for kl in latest_kl_per_dim
+    ]
+    bars = ax.bar(
+        dims,
+        latest_kl_per_dim,
+        color=colors,
+        alpha=0.8,
+        edgecolor="black",
+        linewidth=0.5,
+    )
     ax.axhline(
         y=active_threshold,
         color="red",
@@ -410,7 +474,9 @@ def _plot_kl_bar_chart(fig, kl_matrix, latest_kl_per_dim, active_threshold, subp
             )
 
 
-def _plot_active_units_over_time(fig, epochs, active_units_over_time, latent_dim, subplot_idx):
+def _plot_active_units_over_time(
+    fig, epochs, active_units_over_time, latent_dim, subplot_idx
+):
     """Plot active units over time."""
     ax = plt.subplot(2, 3, subplot_idx)
     ax.plot(
@@ -422,7 +488,13 @@ def _plot_active_units_over_time(fig, epochs, active_units_over_time, latent_dim
         markersize=4,
         label="Active Units",
     )
-    ax.axhline(y=latent_dim, color="gray", linestyle="--", alpha=0.5, label=f"Max ({latent_dim})")
+    ax.axhline(
+        y=latent_dim,
+        color="gray",
+        linestyle="--",
+        alpha=0.5,
+        label=f"Max ({latent_dim})",
+    )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Active Units")
     ax.set_title("Active Units Over Time")
@@ -466,9 +538,15 @@ def _plot_kl_statistics_over_time(fig, epochs, kl_matrix, subplot_idx):
     min_kl = np.min(kl_matrix, axis=1)
 
     ax.plot(epochs, mean_kl, "o-", label="Mean KL", linewidth=2, markersize=3)
-    ax.fill_between(epochs, mean_kl - std_kl, mean_kl + std_kl, alpha=0.3, label="±1 std")
-    ax.plot(epochs, max_kl, "s-", label="Max KL", alpha=0.7, linewidth=1.5, markersize=3)
-    ax.plot(epochs, min_kl, "^-", label="Min KL", alpha=0.7, linewidth=1.5, markersize=3)
+    ax.fill_between(
+        epochs, mean_kl - std_kl, mean_kl + std_kl, alpha=0.3, label="±1 std"
+    )
+    ax.plot(
+        epochs, max_kl, "s-", label="Max KL", alpha=0.7, linewidth=1.5, markersize=3
+    )
+    ax.plot(
+        epochs, min_kl, "^-", label="Min KL", alpha=0.7, linewidth=1.5, markersize=3
+    )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("KL Divergence")
     ax.set_title("KL Statistics Over Time")
@@ -476,7 +554,9 @@ def _plot_kl_statistics_over_time(fig, epochs, kl_matrix, subplot_idx):
     ax.legend()
 
 
-def _plot_kl_distribution_histogram(fig, epochs, kl_matrix, active_threshold, subplot_idx):
+def _plot_kl_distribution_histogram(
+    fig, epochs, kl_matrix, active_threshold, subplot_idx
+):
     """Plot KL distribution histogram."""
     ax = plt.subplot(2, 3, subplot_idx)
 
@@ -508,7 +588,13 @@ def _plot_kl_distribution_histogram(fig, epochs, kl_matrix, active_threshold, su
             linewidth=0.5,
         )
 
-    ax.axvline(x=active_threshold, color="red", linestyle="--", alpha=0.8, label=f"Threshold = {active_threshold}")
+    ax.axvline(
+        x=active_threshold,
+        color="red",
+        linestyle="--",
+        alpha=0.8,
+        label=f"Threshold = {active_threshold}",
+    )
     ax.set_xlabel("KL Divergence")
     ax.set_ylabel("Count")
     ax.set_title("Distribution of KL Values")
@@ -527,7 +613,14 @@ def _plot_cumulative_kl_contribution(fig, latest_kl_per_dim, latent_dim, subplot
     total_kl = np.sum(latest_kl_per_dim)
     cumsum_percentage = 100.0 * cumsum_kl / total_kl
 
-    ax.plot(range(1, latent_dim + 1), cumsum_percentage, "o-", color="purple", linewidth=2, markersize=4)
+    ax.plot(
+        range(1, latent_dim + 1),
+        cumsum_percentage,
+        "o-",
+        color="purple",
+        linewidth=2,
+        markersize=4,
+    )
     ax.axhline(y=90, color="gray", linestyle="--", alpha=0.7, label="90% of total KL")
     ax.axhline(y=95, color="gray", linestyle=":", alpha=0.7, label="95% of total KL")
     ax.set_xlabel("Number of Top Dimensions")

@@ -12,11 +12,13 @@ from torchvision import datasets
 from torchvision.transforms import v2 as T
 from tqdm import tqdm
 
-from model import VAE
+from model import VAE, VAEConfig
 from plotting import (collect_latents, save_gradient_diagnostics,
-                      save_interpolation_combined_figure, save_kl_diagnostics_combined,
+                      save_interpolation_combined_figure,
+                      save_kl_diagnostics_combined,
                       save_latent_combined_figure, save_latent_marginals,
-                      save_recon_figure, save_samples_figure, save_training_curves)
+                      save_recon_figure, save_samples_figure,
+                      save_training_curves)
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -88,7 +90,7 @@ def train(
     epoch_kl_loss = 0.0
     epoch_grad_norm = 0.0  # This will be the realized (clipped) norm
     epoch_unclipped_grad_norm = 0.0  # Track unclipped norm separately
-    
+
     # Only initialize gradient analysis accumulators if needed
     if analyze_gradients:
         epoch_recon_grad_norm = 0.0
@@ -98,7 +100,7 @@ def train(
         epoch_recon_total_cosine = 0.0
         epoch_kl_total_cosine = 0.0
         epoch_recon_kl_cosine = 0.0
-    
+
     n_batches = 0
 
     progress_bar = tqdm(dataloader, desc="Training")
@@ -130,37 +132,55 @@ def train(
         if analyze_gradients:
             # Compute gradients for individual loss components using torch.autograd.grad
             # This is more efficient than multiple backward passes but still adds overhead
-            
+
             # Get model parameters for gradient computation
             params = list(model.parameters())
-            
+
             # Compute reconstruction gradients
             recon_grads = torch.autograd.grad(
-                output.loss_recon, params, retain_graph=True, create_graph=False, allow_unused=True
+                output.loss_recon,
+                params,
+                retain_graph=True,
+                create_graph=False,
+                allow_unused=True,
             )
             # Handle None gradients for unused parameters
-            recon_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(recon_grads, params)]
-            recon_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in recon_grads]).sum()
+            recon_grads = [
+                g if g is not None else torch.zeros_like(p)
+                for g, p in zip(recon_grads, params)
+            ]
+            recon_grad_norm_sq = torch.stack(
+                [g.norm(2).pow(2) for g in recon_grads]
+            ).sum()
             recon_grad_norm = torch.sqrt(recon_grad_norm_sq).item()
-            
+
             # Compute KL gradients
             kl_grads = torch.autograd.grad(
-                output.loss_kl, params, retain_graph=True, create_graph=False, allow_unused=True
+                output.loss_kl,
+                params,
+                retain_graph=True,
+                create_graph=False,
+                allow_unused=True,
             )
             # Handle None gradients for unused parameters
-            kl_grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(kl_grads, params)]
+            kl_grads = [
+                g if g is not None else torch.zeros_like(p)
+                for g, p in zip(kl_grads, params)
+            ]
             kl_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in kl_grads]).sum()
             kl_grad_norm = torch.sqrt(kl_grad_norm_sq).item()
 
         # Compute total gradients (this is always needed)
         loss.backward()
-        
+
         # Get the UNCLIPPED total norm and gradients
         total_grads_unclipped = [
             p.grad.clone() if p.grad is not None else torch.zeros_like(p)
             for p in model.parameters()
         ]
-        unclipped_grad_norm_sq = torch.stack([g.norm(2).pow(2) for g in total_grads_unclipped]).sum()
+        unclipped_grad_norm_sq = torch.stack(
+            [g.norm(2).pow(2) for g in total_grads_unclipped]
+        ).sum()
         unclipped_grad_norm = torch.sqrt(unclipped_grad_norm_sq).item()
 
         # Now apply clipping and get the realized norm
@@ -175,10 +195,12 @@ def train(
         if analyze_gradients:
             # Compute gradient contribution metrics using UNCLIPPED gradients for direction analysis
             recon_total_dot = sum(
-                (rg * tg).sum().item() for rg, tg in zip(recon_grads, total_grads_unclipped)
+                (rg * tg).sum().item()
+                for rg, tg in zip(recon_grads, total_grads_unclipped)
             )
             kl_total_dot = sum(
-                (kg * tg).sum().item() for kg, tg in zip(kl_grads, total_grads_unclipped)
+                (kg * tg).sum().item()
+                for kg, tg in zip(kl_grads, total_grads_unclipped)
             )
             recon_kl_dot = sum(
                 (rg * kg).sum().item() for rg, kg in zip(recon_grads, kl_grads)
@@ -197,7 +219,9 @@ def train(
 
             # Compute cosine similarity between gradients
             recon_total_cosine = recon_total_dot / (
-                torch.sqrt(torch.tensor(recon_grad_norm_sq * total_grad_norm_sq_unclipped))
+                torch.sqrt(
+                    torch.tensor(recon_grad_norm_sq * total_grad_norm_sq_unclipped)
+                )
                 + 1e-8
             )
             kl_total_cosine = kl_total_dot / (
@@ -218,7 +242,7 @@ def train(
         epoch_unclipped_grad_norm += (
             unclipped_grad_norm  # Store unclipped norm for comparison
         )
-        
+
         if analyze_gradients:
             epoch_recon_grad_norm += recon_grad_norm
             epoch_kl_grad_norm += kl_grad_norm
@@ -227,7 +251,7 @@ def train(
             epoch_recon_total_cosine += recon_total_cosine.item()
             epoch_kl_total_cosine += kl_total_cosine.item()
             epoch_recon_kl_cosine += recon_kl_cosine.item()
-        
+
         n_batches += 1
 
         # Update progress bar
@@ -254,14 +278,18 @@ def train(
                 writer.add_scalar(
                     "GradNorm/Train/Unclipped", unclipped_grad_norm, global_step
                 )
-                
+
                 if analyze_gradients:
-                    writer.add_scalar("GradNorm/Train/Recon", recon_grad_norm, global_step)
+                    writer.add_scalar(
+                        "GradNorm/Train/Recon", recon_grad_norm, global_step
+                    )
                     writer.add_scalar("GradNorm/Train/KL", kl_grad_norm, global_step)
                     writer.add_scalar(
                         "GradContrib/Train/Recon", recon_contribution, global_step
                     )
-                    writer.add_scalar("GradContrib/Train/KL", kl_contribution, global_step)
+                    writer.add_scalar(
+                        "GradContrib/Train/KL", kl_contribution, global_step
+                    )
                     writer.add_scalar(
                         "GradCosine/Train/Recon_Total",
                         recon_total_cosine.item(),
@@ -286,7 +314,7 @@ def train(
         history.setdefault("grad_norm_unclipped", []).append(
             epoch_unclipped_grad_norm / n_batches
         )  # Added
-        
+
         if analyze_gradients:
             history.setdefault("recon_grad_norm", []).append(
                 epoch_recon_grad_norm / n_batches
@@ -297,7 +325,9 @@ def train(
             history.setdefault("recon_contrib", []).append(
                 epoch_recon_contribution / n_batches
             )
-            history.setdefault("kl_contrib", []).append(epoch_kl_contribution / n_batches)
+            history.setdefault("kl_contrib", []).append(
+                epoch_kl_contribution / n_batches
+            )
             history.setdefault("recon_total_cosine", []).append(
                 epoch_recon_total_cosine / n_batches
             )
@@ -648,11 +678,12 @@ def main():
     train_loader, test_loader = get_dataloaders(batch_size=args.batch_size)
 
     # Model
-    model = VAE(
+    config = VAEConfig(
         input_dim=args.input_dim,
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
-    ).to(device)
+    )
+    model = VAE(config).to(device)
 
     n_params = count_parameters(model)
     print(f"Number of parameters: {n_params:,}")

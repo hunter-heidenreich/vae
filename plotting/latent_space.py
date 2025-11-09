@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from .core import figure_context, DEFAULT_DPI, DEFAULT_CMAP, DEFAULT_ALPHA
+from .core import DEFAULT_ALPHA, DEFAULT_CMAP, DEFAULT_DPI, figure_context
 from .data import apply_pca_if_needed, get_colormap_colors
 
 

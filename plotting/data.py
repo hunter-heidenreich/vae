@@ -8,7 +8,7 @@ import torch
 from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 
-from .core import model_inference, DEFAULT_CMAP
+from .core import DEFAULT_CMAP, model_inference
 
 if TYPE_CHECKING:
     from model import VAE
