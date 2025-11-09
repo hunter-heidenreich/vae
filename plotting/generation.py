@@ -85,7 +85,7 @@ def save_interpolation_combined_figure(
 
         # Latent space sweep along first dimension
         z1_sweep = torch.linspace(-3, 3, sweep_steps, device=device)
-        z_sweep = torch.zeros(sweep_steps, model.latent_dim, device=device)
+        z_sweep = torch.zeros(sweep_steps, model.config.latent_dim, device=device)
         z_sweep[:, 0] = z1_sweep
         sweep_imgs = decode_samples(model, z_sweep)
 
