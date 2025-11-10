@@ -35,6 +35,23 @@ class VAEConfig:
 
 
 class VAE(nn.Module):
+    def _get_activation(self, activation: str) -> nn.Module:
+        """Get activation function by name."""
+        activation_map = {
+            "relu": nn.ReLU(),
+            "tanh": nn.Tanh(),
+            "sigmoid": nn.Sigmoid(),
+            "elu": nn.ELU(),
+            "leakyrelu": nn.LeakyReLU(),
+            "gelu": nn.GELU(),
+            "silu": nn.SiLU(),
+        }
+        
+        if activation.lower() not in activation_map:
+            raise ValueError(f"Unsupported activation: {activation}")
+        
+        return activation_map[activation.lower()]
+
     def __init__(self, config: VAEConfig):
         super().__init__()
 
@@ -43,13 +60,13 @@ class VAE(nn.Module):
         self.encoder = nn.Sequential(
             nn.Flatten(),
             nn.Linear(config.input_dim, config.hidden_dim),
-            getattr(nn, config.activation.capitalize())(),
+            self._get_activation(config.activation),
             nn.Linear(config.hidden_dim, config.latent_dim * 2),
         )
 
         self.decoder = nn.Sequential(
             nn.Linear(config.latent_dim, config.hidden_dim),
-            getattr(nn, config.activation.capitalize())(),
+            self._get_activation(config.activation),
             nn.Linear(config.hidden_dim, config.input_dim),
             nn.Unflatten(1, config.input_shape),
         )
@@ -104,7 +121,7 @@ class VAE(nn.Module):
         x_ = x_.view(-1, *self.config.input_shape)
 
         # Only encode once, no matter n_samples
-        mu, log_var = self.encode(x_)
+        mu, log_var = self.encode(x)
         std = torch.exp(0.5 * log_var)
 
         # Expand mu and std for n_samples

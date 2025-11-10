@@ -217,7 +217,7 @@ class VAETrainer:
 
         return step_metrics
 
-    def validate(self, dataloader: DataLoader, epoch: int) -> float:
+    def validate(self, dataloader: DataLoader, epoch: int) -> dict[str, float]:
         """
         Validate the model on the given dataset.
 
@@ -226,7 +226,7 @@ class VAETrainer:
             epoch: Current epoch number (1-indexed)
 
         Returns:
-            Average validation loss
+            Dictionary of validation metrics
         """
         self.model.eval()
 
@@ -290,7 +290,7 @@ class VAETrainer:
         # TensorBoard logging
         self._log_validation_step(val_metrics)
 
-        return val_metrics["loss"]
+        return val_metrics
 
     def train(self, train_loader: DataLoader, test_loader: DataLoader):
         """
@@ -302,7 +302,9 @@ class VAETrainer:
         """
         print(f"Starting training for {self.config.num_epochs} epochs...")
 
-        best_val = float("inf")
+        best_val_loss = float("inf")
+        best_val_metrics = None
+        final_val_metrics = None
 
         for epoch in range(self.config.num_epochs):
             print(f"Epoch {epoch + 1}/{self.config.num_epochs}")
@@ -311,7 +313,9 @@ class VAETrainer:
             self.train_epoch(train_loader, epoch + 1)
 
             # Validate
-            val_loss = self.validate(test_loader, epoch + 1)
+            val_metrics = self.validate(test_loader, epoch + 1)
+            val_loss = val_metrics["loss"]
+            final_val_metrics = val_metrics  # Keep updating to get final metrics
 
             # Save checkpoints
             self.save_checkpoint(
@@ -329,15 +333,20 @@ class VAETrainer:
                     ),
                 )
 
-            if val_loss < best_val:
-                best_val = val_loss
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_val_metrics = val_metrics.copy()  # Store all best metrics
                 self.save_checkpoint(
                     epoch=epoch + 1,
                     filepath=os.path.join(self.ckpt_dir, "checkpoint_best.pt"),
                     is_best=True,
                 )
 
-        print(f"Training completed! Best validation loss: {best_val:.4f}")
+        print(f"Training completed! Best validation loss: {best_val_loss:.4f}")
+
+        # Store final metrics for performance logging
+        self.best_val_metrics = best_val_metrics
+        self.final_val_metrics = final_val_metrics
 
     def generate_analysis_plots(self, test_loader: DataLoader):
         """
@@ -587,6 +596,55 @@ class VAETrainer:
         self.history.val_history = val_history
 
         return checkpoint
+
+    def save_performance_metrics(self, filepath: str):
+        """
+        Save final performance metrics to JSON file.
+        
+        Args:
+            filepath: Path to save the performance metrics JSON
+        """
+        import json
+        from datetime import datetime
+        
+        # Get model parameter count
+        param_count = self._count_parameters()
+        
+        # Prepare performance data
+        performance_data = {
+            "timestamp": datetime.now().isoformat(),
+            "model_info": {
+                "parameters": param_count,
+                "input_dim": self.model.config.input_dim,
+                "hidden_dim": self.model.config.hidden_dim,
+                "latent_dim": self.model.config.latent_dim,
+                "architecture": "VAE",
+            },
+            "training_info": {
+                "epochs_completed": self.config.num_epochs,
+                "total_steps": self.global_step,
+                "batch_size": self.config.batch_size,
+                "learning_rate": self.config.learning_rate,
+            },
+            "final_metrics": {
+                "epoch": self.config.num_epochs,
+                "total_loss": self.final_val_metrics["loss"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
+                "reconstruction_loss": self.final_val_metrics["recon"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
+                "kl_loss": self.final_val_metrics["kl"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
+            },
+            "best_metrics": {
+                "total_loss": self.best_val_metrics["loss"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
+                "reconstruction_loss": self.best_val_metrics["recon"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
+                "kl_loss": self.best_val_metrics["kl"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
+            },
+        }
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        # Save to JSON
+        with open(filepath, 'w') as f:
+            json.dump(performance_data, f, indent=2, default=str)
 
     def close(self):
         """Clean up resources."""

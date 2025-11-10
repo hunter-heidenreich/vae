@@ -1,5 +1,8 @@
 import argparse
+import json
 import os
+import sys
+from datetime import datetime
 
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -42,8 +45,8 @@ def parse_args():
     parser.add_argument(
         "--latent-dim",
         type=int,
-        default=10,
-        help="Dimensionality of the latent space (default: 10)",
+        default=2,
+        help="Dimensionality of the latent space (default: 2)",
     )
     parser.add_argument(
         "--hidden-dim",
@@ -57,14 +60,21 @@ def parse_args():
         default=784,
         help="Dimensionality of the input (default: 784 for MNIST)",
     )
+    parser.add_argument(
+        "--activation",
+        type=str,
+        default="tanh",
+        choices=["relu", "tanh", "sigmoid", "elu", "leakyrelu", "gelu", "silu"],
+        help="Activation function for encoder and decoder (default: tanh)",
+    )
 
     # Training hyperparameters
     parser.add_argument(
         "--learning-rate",
         "--lr",
         type=float,
-        default=3e-4,
-        help="Learning rate for optimizer (default: 3e-4)",
+        default=1e-3,
+        help="Learning rate for optimizer (default: 1e-3)",
     )
     parser.add_argument(
         "--weight-decay",
@@ -75,8 +85,8 @@ def parse_args():
     parser.add_argument(
         "--num-epochs",
         type=int,
-        default=10,
-        help="Number of training epochs (default: 10)",
+        default=100,
+        help="Number of training epochs (default: 100)",
     )
     parser.add_argument(
         "--batch-size",
@@ -93,16 +103,10 @@ def parse_args():
 
     # VAE-specific options
     parser.add_argument(
-        "--use-torch-kl",
-        action="store_true",
-        default=False,
-        help="Use torch.distributions.kl.kl_divergence instead of manual analytic formula (default: use manual formula)",
-    )
-    parser.add_argument(
         "--use-distributions",
         action="store_true",
         default=False,
-        help="Use torch.distributions for sampling (default: False)",
+        help="Use torch.distributions for sampling and KL divergence (default: False)",
     )
 
     # Logging and checkpointing
@@ -183,8 +187,8 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
-        default=None,
-        help="Random seed for reproducibility (default: None)",
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
     )
 
     return parser.parse_args()
@@ -220,12 +224,14 @@ def main():
         input_dim=args.input_dim,
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
+        activation=args.activation,
         use_torch_distributions=args.use_distributions,
         n_samples=args.n_latent_samples,
     )
 
     # Create model
     model = VAE(model_config)
+    print(model)
 
     # Create data loaders
     train_loader, test_loader = get_dataloaders(batch_size=trainer_config.batch_size)
@@ -233,9 +239,62 @@ def main():
     # Create and run trainer
     trainer = VAETrainer(model=model, config=trainer_config)
 
+    # Save CLI arguments and configurations for tracking
+    args_dict = vars(args)
+    args_file = os.path.join(trainer.run_dir, "cli_args.json")
+    with open(args_file, 'w') as f:
+        json.dump(args_dict, f, indent=2, default=str)
+    print(f"CLI arguments saved to: {args_file}")
+    
+    # Save full configuration (trainer + model configs)
+    config_dict = {
+        "trainer_config": trainer_config.__dict__,
+        "model_config": model_config.__dict__,
+        "cli_args": args_dict
+    }
+    config_file = os.path.join(trainer.run_dir, "full_config.json")
+    with open(config_file, 'w') as f:
+        json.dump(config_dict, f, indent=2, default=str)
+    print(f"Full configuration saved to: {config_file}")
+    
+    # Save human-readable run summary
+    summary_file = os.path.join(trainer.run_dir, "run_summary.txt")
+    with open(summary_file, 'w') as f:
+        f.write(f"VAE Training Run Summary\n")
+        f.write(f"{'='*50}\n\n")
+        f.write(f"Run Information:\n")
+        f.write(f"  - Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"  - Command: {' '.join(sys.argv)}\n")
+        f.write(f"  - Working directory: {os.getcwd()}\n\n")
+        f.write(f"Model Architecture:\n")
+        f.write(f"  - Input dimension: {model_config.input_dim}\n")
+        f.write(f"  - Hidden dimension: {model_config.hidden_dim}\n")
+        f.write(f"  - Latent dimension: {model_config.latent_dim}\n")
+        f.write(f"  - Activation function: {model_config.activation}\n")
+        f.write(f"  - Use distributions: {model_config.use_torch_distributions}\n\n")
+        f.write(f"Training Parameters:\n")
+        f.write(f"  - Learning rate: {trainer_config.learning_rate}\n")
+        f.write(f"  - Weight decay: {trainer_config.weight_decay}\n")
+        f.write(f"  - Batch size: {trainer_config.batch_size}\n")
+        f.write(f"  - Number of epochs: {trainer_config.num_epochs}\n")
+        f.write(f"  - Max grad norm: {trainer_config.max_grad_norm}\n")
+        f.write(f"  - Device: {trainer_config.device}\n")
+        f.write(f"  - Seed: {trainer_config.seed}\n\n")
+        f.write(f"Analysis Options:\n")
+        f.write(f"  - Analyze gradients: {trainer_config.analyze_gradients}\n")
+        f.write(f"  - Max latent batches: {trainer_config.max_latent_batches}\n")
+        f.write(f"  - Interpolation method: {trainer_config.interp_method}\n")
+        f.write(f"  - Interpolation steps: {trainer_config.interp_steps}\n")
+    print(f"Run summary saved to: {summary_file}")
+
     try:
         # Run complete training
         trainer.train(train_loader, test_loader)
+
+        # Save performance metrics
+        performance_file = os.path.join(trainer.run_dir, "performance.json")
+        trainer.save_performance_metrics(performance_file)
+        print(f"Performance metrics saved to: {performance_file}")
 
         # Generate analysis plots
         trainer.generate_analysis_plots(test_loader)

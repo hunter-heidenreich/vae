@@ -12,3 +12,4 @@ wheels/
 # Core project files 
 runs/
 benchmark_results.csv
+*.log
