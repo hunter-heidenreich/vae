@@ -54,6 +54,31 @@ def collect_latents(
     return np.concatenate(zs, axis=0), np.concatenate(ys, axis=0)
 
 
+def collect_latents_with_logvar(
+    model: "VAE",
+    dataloader: DataLoader,
+    device: torch.device,
+    max_batches: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Collect latent representations (mu and logvar) and labels from a dataset."""
+    mus: list[np.ndarray] = []
+    logvars: list[np.ndarray] = []
+    ys: list[np.ndarray] = []
+
+    with model_inference(model):
+        for bidx, (data, target) in enumerate(dataloader):
+            data = data.to(device)
+            mu, log_var = model.encode(data)
+            mus.append(mu.cpu().numpy())
+            logvars.append(log_var.cpu().numpy())
+            ys.append(target.numpy())
+
+            if max_batches is not None and (bidx + 1) >= max_batches:
+                break
+
+    return np.concatenate(mus, axis=0), np.concatenate(logvars, axis=0), np.concatenate(ys, axis=0)
+
+
 def compute_kl_per_dimension(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     """
     Compute KL divergence for each latent dimension separately.

@@ -14,11 +14,12 @@ from tqdm import tqdm
 
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
-from plotting import (collect_latents, compute_kl_per_dimension,
+from plotting import (collect_latents, collect_latents_with_logvar, compute_kl_per_dimension,
                       save_gradient_diagnostics,
                       save_interpolation_combined_figure,
                       save_kl_diagnostics_combined,
                       save_latent_combined_figure, save_latent_marginals,
+                      save_logvar_combined_figure, save_logvar_marginals,
                       save_recon_figure, save_samples_figure,
                       save_training_curves)
 from trainer_config import TrainerConfig
@@ -348,6 +349,16 @@ class VAETrainer:
         self.best_val_metrics = best_val_metrics
         self.final_val_metrics = final_val_metrics
 
+    def load_best_model(self):
+        """Load the best model checkpoint for analysis."""
+        best_checkpoint_path = os.path.join(self.ckpt_dir, "checkpoint_best.pt")
+        if os.path.exists(best_checkpoint_path):
+            print(f"Loading best model checkpoint from: {best_checkpoint_path}")
+            checkpoint = self.load_checkpoint(best_checkpoint_path)
+            print(f"Loaded best model from epoch {checkpoint.get('epoch', 'unknown')}")
+        else:
+            print("Warning: Best model checkpoint not found, using current model state")
+
     def generate_analysis_plots(self, test_loader: DataLoader):
         """
         Generate all post-training analysis plots and figures.
@@ -390,17 +401,31 @@ class VAETrainer:
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
         )
 
-        # Latent space analysis
+        # Latent space analysis (mean and log variance)
         Z, Y = collect_latents(
             self.model,
             test_loader,
             self.device,
             max_batches=self.config.max_latent_batches,
         )
+        Mu, LogVar, Y_with_logvar = collect_latents_with_logvar(
+            self.model,
+            test_loader,
+            self.device,
+            max_batches=self.config.max_latent_batches,
+        )
+        
+        # Mean (mu) plots
         save_latent_combined_figure(
             Z, Y, os.path.join(self.fig_dir, "mnist-2d-combined.webp")
         )
         save_latent_marginals(Z, os.path.join(self.fig_dir, "mnist-1d-hists.webp"))
+        
+        # Log variance (logvar) plots
+        save_logvar_combined_figure(
+            LogVar, Y_with_logvar, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
+        )
+        save_logvar_marginals(LogVar, os.path.join(self.fig_dir, "mnist-logvar-1d-hists.webp"))
 
         # Training curves
         save_training_curves(

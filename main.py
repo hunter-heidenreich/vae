@@ -108,6 +108,31 @@ def parse_args():
         default=False,
         help="Use torch.distributions for sampling and KL divergence (default: False)",
     )
+    parser.add_argument(
+        "--use-softplus-std",
+        action="store_true",
+        default=False,
+        help="Use softplus parameterization for standard deviation in latent space (default: False)",
+    )
+    parser.add_argument(
+        "--n-latent-samples",
+        type=int,
+        default=1,
+        help="Number of latent samples per input for ELBO estimation (default: 1)",
+    )
+    parser.add_argument(
+        "--probabilistic-reconstruction",
+        action="store_true",
+        default=False,
+        help="Use probabilistic reconstruction instead of deterministic (default: False)",
+    )
+    parser.add_argument(
+        "--probabilistic-mode",
+        type=str,
+        default="beta",
+        choices=["beta", "logit_normal"],
+        help="Type of probabilistic reconstruction distribution (default: beta)",
+    )
 
     # Logging and checkpointing
     parser.add_argument(
@@ -169,12 +194,6 @@ def parse_args():
         default="slerp",
         help="Interpolation method in latent space (default: slerp)",
     )
-    parser.add_argument(
-        "--n-latent-samples",
-        type=int,
-        default=1,
-        help="Number of latent samples per input for ELBO estimation (default: 1)",
-    )
 
     # Device
     parser.add_argument(
@@ -226,7 +245,10 @@ def main():
         latent_dim=args.latent_dim,
         activation=args.activation,
         use_torch_distributions=args.use_distributions,
+        use_softplus_std=args.use_softplus_std,
         n_samples=args.n_latent_samples,
+        probabilistic_reconstruction=args.probabilistic_reconstruction,
+        probabilistic_mode=args.probabilistic_mode,
     )
 
     # Create model
@@ -296,7 +318,8 @@ def main():
         trainer.save_performance_metrics(performance_file)
         print(f"Performance metrics saved to: {performance_file}")
 
-        # Generate analysis plots
+        # Load best model and generate analysis plots
+        trainer.load_best_model()
         trainer.generate_analysis_plots(test_loader)
 
     finally:
