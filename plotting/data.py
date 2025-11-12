@@ -26,7 +26,7 @@ def apply_pca_if_needed(
     return Z_reduced, pca
 
 
-def get_colormap_colors(n_colors: int, cmap_name: str = DEFAULT_CMAP) -> np.ndarray:
+def get_colormap_colors(n_colors: int, cmap_name: str = DEFAULT_CMAP):
     """Get evenly spaced colors from a colormap."""
     return cm.get_cmap(cmap_name)(np.linspace(0, 1, n_colors))
 
@@ -77,6 +77,64 @@ def collect_latents_with_logvar(
                 break
 
     return np.concatenate(mus, axis=0), np.concatenate(logvars, axis=0), np.concatenate(ys, axis=0)
+
+
+def collect_all_latent_data(
+    model: "VAE",
+    dataloader: DataLoader,
+    device: torch.device,
+    max_batches: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Efficiently collect all latent data in a single pass over the dataloader.
+    
+    This combines the functionality of collect_latents() and collect_latents_with_logvar()
+    to eliminate redundant data loading and model inference passes.
+
+    Args:
+        model: The VAE model
+        dataloader: DataLoader to iterate over
+        device: Device to run inference on
+        max_batches: Maximum number of batches to process (None for all)
+
+    Returns:
+        Tuple of (Z_samples, Mu, LogVar, Y) where:
+        - Z_samples: Sampled latent codes (from reparameterization)
+        - Mu: Mean parameters from encoder
+        - LogVar: Log variance parameters from encoder (sigma from encode, not log_var)
+        - Y: Labels/targets
+    """
+    z_samples: list[np.ndarray] = []
+    mus: list[np.ndarray] = []
+    sigmas: list[np.ndarray] = []  # Note: sigma from encode, not logvar
+    ys: list[np.ndarray] = []
+
+    with model_inference(model):
+        for bidx, (data, target) in enumerate(dataloader):
+            data = data.to(device)
+            
+            # Get mu and sigma from encoder
+            mu, sigma = model.encode(data)
+            
+            # Convert sigma to std and sample z using reparameterization
+            std = model._sigma_to_std(sigma)
+            z = model.reparameterize(mu, std)
+            
+            # Collect all data
+            z_samples.append(z.cpu().numpy())
+            mus.append(mu.cpu().numpy())
+            sigmas.append(sigma.cpu().numpy())  # Return sigma (log_var equivalent)
+            ys.append(target.numpy())
+
+            if max_batches is not None and (bidx + 1) >= max_batches:
+                break
+
+    return (
+        np.concatenate(z_samples, axis=0),
+        np.concatenate(mus, axis=0), 
+        np.concatenate(sigmas, axis=0),
+        np.concatenate(ys, axis=0)
+    )
 
 
 def compute_kl_per_dimension(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
-from plotting import (collect_latents, collect_latents_with_logvar, compute_kl_per_dimension,
+from plotting import (collect_all_latent_data, compute_kl_per_dimension,
                       save_gradient_diagnostics,
                       save_interpolation_combined_figure,
                       save_kl_diagnostics_combined,
@@ -117,10 +117,17 @@ class VAETrainer:
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
     def _compute_grad_norm(self, gradients: list[torch.Tensor]) -> float:
-        """Compute L2 norm of a list of gradients."""
-        return torch.sqrt(
-            torch.stack([g.norm(2).pow(2) for g in gradients]).sum()
-        ).item()
+        """Compute L2 norm of a list of gradients efficiently."""
+        if not gradients:
+            return 0.0
+        # Use a generator expression with Python's sum to avoid 
+        # creating intermediate tensor via torch.stack
+        # Start with first gradient's squared norm to ensure we have a tensor
+        grad_iter = iter(gradients)
+        total_norm_sq = next(grad_iter).norm(2).pow(2)
+        for g in grad_iter:
+            total_norm_sq = total_norm_sq + g.norm(2).pow(2)
+        return torch.sqrt(total_norm_sq).item()
 
     def train_epoch(self, dataloader: DataLoader, epoch: int) -> int:
         """
@@ -141,28 +148,23 @@ class VAETrainer:
         progress_bar = tqdm(dataloader, desc=f"Training Epoch {epoch}")
 
         for _, (data, _) in enumerate(progress_bar):
-            # Execute single training step and collect metrics
-            step_metrics = self._train_step(data)
+            step_metrics = self._train_step(data, return_metrics=self.global_step % self.config.log_interval == 0)
 
-            # Accumulate metrics
-            metrics_accumulator.add_step(step_metrics)
-
-            self.global_step += 1
-
-            # Update progress bar with latest metrics
-            latest_metrics = metrics_accumulator.get_latest()
-            progress_bar.set_postfix(
-                {
-                    "Loss": f"{latest_metrics.get('loss', 0):.3f}",
-                    "Recon": f"{latest_metrics.get('recon', 0):.3f}",
-                    "KL": f"{latest_metrics.get('kl', 0):.3f}",
-                    "GNorm": f"{latest_metrics.get('grad_norm_realized', 0):.2f}",
-                }
-            )
-
-            # Logging
-            if self.global_step % self.config.log_interval == 0:
+             # Logging
+            if step_metrics is not None:
+                metrics_accumulator.add_step(step_metrics)
                 self._log_training_step_from_metrics(step_metrics)
+                
+                # Update progress bar with latest metrics
+                latest_metrics = metrics_accumulator.get_latest()
+                progress_bar.set_postfix(
+                    {
+                        "Loss": f"{latest_metrics.get('loss', 0):.3f}",
+                        "Recon": f"{latest_metrics.get('recon', 0):.3f}",
+                        "KL": f"{latest_metrics.get('kl', 0):.3f}",
+                        "GNorm": f"{latest_metrics.get('grad_norm_realized', 0):.2f}",
+                    }
+                )
 
         # Record epoch-level averages
         epoch_averages = metrics_accumulator.get_averages()
@@ -170,12 +172,13 @@ class VAETrainer:
 
         return metrics_accumulator.get_count()
 
-    def _train_step(self, data: torch.Tensor) -> dict[str, float]:
+    def _train_step(self, data: torch.Tensor, return_metrics: bool = False) -> dict[str, float] | None:
         """
         Execute a single training step and return metrics.
 
         Args:
             data: Input batch data
+            return_metrics: Whether to return metrics dictionary
 
         Returns:
             Dictionary of step metrics
@@ -190,9 +193,9 @@ class VAETrainer:
             reconstruct=False,
         )
 
-        # Gradient analysis (if enabled)
+        # Gradient analysis (if enabled) - MUST be done before backward() frees the graph
         step_grad_metrics = {}
-        if self.config.analyze_gradients:
+        if return_metrics and self.config.analyze_gradients:
             step_grad_metrics = self._compute_gradient_metrics(output)
 
         # Backward pass
@@ -203,6 +206,9 @@ class VAETrainer:
 
         # Optimizer step
         self.optimizer.step()
+        
+        if not return_metrics:
+            return
 
         # Collect all step metrics
         step_metrics = {
@@ -401,29 +407,24 @@ class VAETrainer:
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
         )
 
-        # Latent space analysis (mean and log variance)
-        Z, Y = collect_latents(
-            self.model,
-            test_loader,
-            self.device,
-            max_batches=self.config.max_latent_batches,
-        )
-        Mu, LogVar, Y_with_logvar = collect_latents_with_logvar(
+        # Latent space analysis (mean and log variance) - OPTIMIZED: Single pass over data
+        print("Collecting latent space data (single pass)...")
+        Z, Mu, LogVar, Y = collect_all_latent_data(
             self.model,
             test_loader,
             self.device,
             max_batches=self.config.max_latent_batches,
         )
         
-        # Mean (mu) plots
+        # Mean (mu) plots - using Z (sampled latents) for visualization
         save_latent_combined_figure(
             Z, Y, os.path.join(self.fig_dir, "mnist-2d-combined.webp")
         )
         save_latent_marginals(Z, os.path.join(self.fig_dir, "mnist-1d-hists.webp"))
         
-        # Log variance (logvar) plots
+        # Log variance (sigma/logvar) plots
         save_logvar_combined_figure(
-            LogVar, Y_with_logvar, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
+            LogVar, Y, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
         )
         save_logvar_marginals(LogVar, os.path.join(self.fig_dir, "mnist-logvar-1d-hists.webp"))
 
@@ -492,13 +493,14 @@ class VAETrainer:
         # Compute cosine similarity between recon and KL gradients
         recon_kl_cosine = 0.0
         if recon_grad_norm > 0 and kl_grad_norm > 0:
-            # Compute dot product
-            dot_product = (
-                torch.stack([(r * k).sum() for r, k in zip(recon_grads, kl_grads)])
-                .sum()
-                .item()
-            )
-            recon_kl_cosine = dot_product / (recon_grad_norm * kl_grad_norm)
+            # Compute dot product efficiently - avoid torch.stack
+            # Start with first pair to ensure we have a tensor
+            grad_pairs = list(zip(recon_grads, kl_grads))
+            if grad_pairs:
+                dot_product = (grad_pairs[0][0] * grad_pairs[0][1]).sum()
+                for r, k in grad_pairs[1:]:
+                    dot_product = dot_product + (r * k).sum()
+                recon_kl_cosine = dot_product.item() / (recon_grad_norm * kl_grad_norm)
 
         # Compute relative contributions to total gradient direction
         total_grad_norm_sq = recon_grad_norm**2 + kl_grad_norm**2
@@ -518,21 +520,31 @@ class VAETrainer:
 
     def _handle_gradient_clipping(self) -> dict[str, float]:
         """
-        Handle gradient clipping and compute gradient norms.
+        Handle gradient clipping and compute gradient norms efficiently.
 
         Returns:
             Dictionary with 'realized' and 'unclipped' gradient norms
         """
-        # Get unclipped gradient norm
-        total_grads_unclipped = [
-            p.grad.clone() if p.grad is not None else torch.zeros_like(p)
-            for p in self.model.parameters()
+        # Get all parameters that have gradients
+        params = [
+            p for p in self.model.parameters() if p.grad is not None
         ]
-        unclipped_grad_norm = self._compute_grad_norm(total_grads_unclipped)
+        if not params:
+            # Handle edge case of no gradients
+            return {"realized": 0.0, "unclipped": 0.0}
 
-        # Apply clipping if specified
+        # Use float('inf') as the max_norm to ONLY compute the norm
+        # if no clipping is desired.
+        max_norm = self.config.max_grad_norm
+        if max_norm is None:
+            max_norm = float('inf')
+
+        # clip_grad_norm_ computes and returns the total unclipped norm
+        # This is the only norm computation we need - no redundant work!
+        unclipped_grad_norm = clip_grad_norm_(params, max_norm=max_norm).item()
+
         if self.config.max_grad_norm is not None:
-            clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            # The realized norm is the smaller of the two
             realized_grad_norm = min(unclipped_grad_norm, self.config.max_grad_norm)
         else:
             realized_grad_norm = unclipped_grad_norm
@@ -640,7 +652,7 @@ class VAETrainer:
             "timestamp": datetime.now().isoformat(),
             "model_info": {
                 "parameters": param_count,
-                "input_dim": self.model.config.input_dim,
+                "input_shape": self.model.config.input_shape,
                 "hidden_dim": self.model.config.hidden_dim,
                 "latent_dim": self.model.config.latent_dim,
                 "architecture": "VAE",

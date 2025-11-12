@@ -55,10 +55,10 @@ def parse_args():
         help="Dimensionality of the hidden layer (default: 512)",
     )
     parser.add_argument(
-        "--input-dim",
-        type=int,
-        default=784,
-        help="Dimensionality of the input (default: 784 for MNIST)",
+        "--input-shape",
+        type=tuple,
+        default=(1, 28, 28),
+        help="Shape of the input data (default: (1, 28, 28))",
     )
     parser.add_argument(
         "--activation",
@@ -103,12 +103,6 @@ def parse_args():
 
     # VAE-specific options
     parser.add_argument(
-        "--use-distributions",
-        action="store_true",
-        default=False,
-        help="Use torch.distributions for sampling and KL divergence (default: False)",
-    )
-    parser.add_argument(
         "--use-softplus-std",
         action="store_true",
         default=False,
@@ -119,19 +113,6 @@ def parse_args():
         type=int,
         default=1,
         help="Number of latent samples per input for ELBO estimation (default: 1)",
-    )
-    parser.add_argument(
-        "--probabilistic-reconstruction",
-        action="store_true",
-        default=False,
-        help="Use probabilistic reconstruction instead of deterministic (default: False)",
-    )
-    parser.add_argument(
-        "--probabilistic-mode",
-        type=str,
-        default="beta",
-        choices=["beta", "logit_normal"],
-        help="Type of probabilistic reconstruction distribution (default: beta)",
     )
 
     # Logging and checkpointing
@@ -144,8 +125,8 @@ def parse_args():
     parser.add_argument(
         "--log-interval",
         type=int,
-        default=100,
-        help="How often to log training metrics (default: 100 steps)",
+        default=5,
+        help="How often to log training metrics (default: 5 steps)",
     )
     parser.add_argument(
         "--checkpoint-interval",
@@ -240,15 +221,12 @@ def main():
 
     # Create model configuration
     model_config = VAEConfig(
-        input_dim=args.input_dim,
+        input_shape=args.input_shape,
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
         activation=args.activation,
-        use_torch_distributions=args.use_distributions,
         use_softplus_std=args.use_softplus_std,
         n_samples=args.n_latent_samples,
-        probabilistic_reconstruction=args.probabilistic_reconstruction,
-        probabilistic_mode=args.probabilistic_mode,
     )
 
     # Create model
@@ -278,36 +256,6 @@ def main():
     with open(config_file, 'w') as f:
         json.dump(config_dict, f, indent=2, default=str)
     print(f"Full configuration saved to: {config_file}")
-    
-    # Save human-readable run summary
-    summary_file = os.path.join(trainer.run_dir, "run_summary.txt")
-    with open(summary_file, 'w') as f:
-        f.write(f"VAE Training Run Summary\n")
-        f.write(f"{'='*50}\n\n")
-        f.write(f"Run Information:\n")
-        f.write(f"  - Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"  - Command: {' '.join(sys.argv)}\n")
-        f.write(f"  - Working directory: {os.getcwd()}\n\n")
-        f.write(f"Model Architecture:\n")
-        f.write(f"  - Input dimension: {model_config.input_dim}\n")
-        f.write(f"  - Hidden dimension: {model_config.hidden_dim}\n")
-        f.write(f"  - Latent dimension: {model_config.latent_dim}\n")
-        f.write(f"  - Activation function: {model_config.activation}\n")
-        f.write(f"  - Use distributions: {model_config.use_torch_distributions}\n\n")
-        f.write(f"Training Parameters:\n")
-        f.write(f"  - Learning rate: {trainer_config.learning_rate}\n")
-        f.write(f"  - Weight decay: {trainer_config.weight_decay}\n")
-        f.write(f"  - Batch size: {trainer_config.batch_size}\n")
-        f.write(f"  - Number of epochs: {trainer_config.num_epochs}\n")
-        f.write(f"  - Max grad norm: {trainer_config.max_grad_norm}\n")
-        f.write(f"  - Device: {trainer_config.device}\n")
-        f.write(f"  - Seed: {trainer_config.seed}\n\n")
-        f.write(f"Analysis Options:\n")
-        f.write(f"  - Analyze gradients: {trainer_config.analyze_gradients}\n")
-        f.write(f"  - Max latent batches: {trainer_config.max_latent_batches}\n")
-        f.write(f"  - Interpolation method: {trainer_config.interp_method}\n")
-        f.write(f"  - Interpolation steps: {trainer_config.interp_steps}\n")
-    print(f"Run summary saved to: {summary_file}")
 
     try:
         # Run complete training
