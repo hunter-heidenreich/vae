@@ -118,6 +118,7 @@ class TrainingHistory:
         """Initialize empty training history."""
         self.train_history: Dict[str, List[Any]] = {}
         self.val_history: Dict[str, List[Any]] = {}
+        self.train_step_history: Dict[str, List[Any]] = {}
 
     def record_epoch_metrics(
         self, metrics: Dict[str, Any], epoch: int, is_train: bool = True
@@ -139,6 +140,28 @@ class TrainingHistory:
         for key, value in metrics.items():
             history.setdefault(key, []).append(value)
 
+    def record_step_metrics(
+        self, metrics: Dict[str, Any], step: int, is_train: bool = True
+    ):
+        """
+        Record step-level metrics in history.
+
+        Args:
+            metrics: Dictionary of metrics to record
+            step: Current step number
+            is_train: Whether these are training (True) or validation (False) metrics
+        """
+        if not is_train:
+            # We don't record step-level metrics for validation
+            return
+            
+        # Always record the step
+        self.train_step_history.setdefault("step", []).append(step)
+
+        # Record all provided metrics
+        for key, value in metrics.items():
+            self.train_step_history.setdefault(key, []).append(value)
+
     def get_train_history(self) -> Dict[str, List[Any]]:
         """Get a copy of training history."""
         return {k: v.copy() for k, v in self.train_history.items()}
@@ -147,7 +170,12 @@ class TrainingHistory:
         """Get a copy of validation history."""
         return {k: v.copy() for k, v in self.val_history.items()}
 
+    def get_train_step_history(self) -> Dict[str, List[Any]]:
+        """Get a copy of training step-level history."""
+        return {k: v.copy() for k, v in self.train_step_history.items()}
+
     def clear(self):
         """Clear all history."""
         self.train_history.clear()
         self.val_history.clear()
+        self.train_step_history.clear()

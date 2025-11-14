@@ -109,6 +109,12 @@ def parse_args():
         help="Use softplus parameterization for standard deviation in latent space (default: False)",
     )
     parser.add_argument(
+        "--bound-std",
+        type=float,
+        default=None,
+        help="Optional upper bound for std deviation; when set, caps std with sigmoid * bound_std (default: None)",
+    )
+    parser.add_argument(
         "--n-latent-samples",
         type=int,
         default=1,
@@ -226,6 +232,7 @@ def main():
         latent_dim=args.latent_dim,
         activation=args.activation,
         use_softplus_std=args.use_softplus_std,
+        bound_std=args.bound_std,
         n_samples=args.n_latent_samples,
     )
 

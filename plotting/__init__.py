@@ -3,12 +3,13 @@
 
 from .core import (decode_samples, figure_context, grid_from_images,
                    model_inference)
-from .data import (apply_pca_if_needed, collect_latents, collect_latents_with_logvar,
-                   collect_all_latent_data, compute_kl_per_dimension)
-from .diagnostics import (save_gradient_diagnostics,
-                          save_kl_diagnostics_combined, save_training_curves)
-from .generation import (save_interpolation_combined_figure, save_recon_figure,
-                         save_samples_figure)
+from .data import (apply_pca_if_needed, collect_latents, collect_latents_with_std,
+                   collect_all_latent_data, compute_kl_per_dimension, get_colormap_colors)
+from .training_curves import save_training_curves
+from .gradient_analysis import save_gradient_diagnostics
+from .kl_analysis import save_kl_diagnostics_separate
+from .generation import (save_interpolation_and_sweep_figures, save_interpolation_figure,
+                         save_latent_sweep_figure, save_recon_figure, save_samples_figure)
 from .latent_space import (save_latent_combined_figure, save_latent_marginals,
                           save_logvar_combined_figure, save_logvar_marginals)
 
@@ -21,14 +22,17 @@ __all__ = [
     "grid_from_images",
     # Data processing
     "collect_latents",
-    "collect_latents_with_logvar",
+    "collect_latents_with_std",
     "collect_all_latent_data",
     "apply_pca_if_needed",
     "compute_kl_per_dimension",
+    "get_colormap_colors",
     # Generation plots
     "save_samples_figure",
     "save_recon_figure",
-    "save_interpolation_combined_figure",
+    "save_interpolation_figure",
+    "save_latent_sweep_figure",
+    "save_interpolation_and_sweep_figures",
     # Latent space plots
     "save_latent_combined_figure",
     "save_latent_marginals",
@@ -37,5 +41,5 @@ __all__ = [
     # Diagnostic plots
     "save_training_curves",
     "save_gradient_diagnostics",
-    "save_kl_diagnostics_combined",
+    "save_kl_diagnostics_separate",
 ]

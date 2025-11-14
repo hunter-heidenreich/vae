@@ -1,5 +1,6 @@
 """Image generation and sampling plots."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Sized, cast
 
 import matplotlib.pyplot as plt
@@ -48,26 +49,23 @@ def save_recon_figure(
         mu, _ = model.encode(data)
         recon = decode_samples(model, mu)
 
-    # Stack originals then reconstructions
-    imgs = torch.cat([data.view(-1, 1, 28, 28), recon], dim=0)
-    img_grid = grid_from_images(imgs, 2, n)  # 2×n grid
+    imgs = torch.cat([data.view(-1, *model.config.input_shape), recon], dim=0)
+    img_grid = grid_from_images(imgs, 2, n)
 
     with figure_context((n * 1.5, 2 * 1.5), out_path):
         plt.axis("off")
         plt.imshow(img_grid, cmap="gray")
 
 
-def save_interpolation_combined_figure(
+def save_interpolation_figure(
     model: "VAE",
     loader: DataLoader,
     device: torch.device,
     out_path: str,
     steps: int = 15,
     method: str = "slerp",
-    sweep_steps: int = 15,
 ):
-    """Create combined interpolation figure with data interpolation on top and latent sweep on bottom."""
-    # First, get interpolation between two random examples
+    """Create interpolation figure between two random data points."""
     ds = loader.dataset  # type: ignore[attr-defined]
     ds_sized = cast(Sized, ds)
     idx = torch.randint(0, len(ds_sized), (2,))
@@ -76,39 +74,77 @@ def save_interpolation_combined_figure(
     x = torch.stack([x0, x1], dim=0).to(device)
 
     with model_inference(model):
-        # Interpolation between examples
         mu, _ = model.encode(x)
         z0, z1 = mu[0], mu[1]
         t = torch.linspace(0, 1, steps, device=device)
         zs = _slerp(z0, z1, t) if method.lower() == "slerp" else _lerp(z0, z1, t)
         interp_imgs = decode_samples(model, zs)
 
-        # Latent space sweep along first dimension
-        z1_sweep = torch.linspace(-3, 3, sweep_steps, device=device)
-        z_sweep = torch.zeros(sweep_steps, model.config.latent_dim, device=device)
-        z_sweep[:, 0] = z1_sweep
-        sweep_imgs = decode_samples(model, z_sweep)
-
-    # Create grids
     interp_grid = grid_from_images(interp_imgs, 1, steps)
-    sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
+    
+    with figure_context((steps, 1.5), out_path):
+        plt.imshow(interp_grid, cmap="gray")
+        plt.axis("off")
+        plt.title("Interpolation Between Two Data Points", fontsize=12, pad=10)
 
-    # Create figure with 2 subplots stacked vertically
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(steps, sweep_steps), 3))
 
-    # Top plot: interpolation between examples
-    ax1.imshow(interp_grid, cmap="gray")
-    ax1.axis("off")
-    ax1.set_title("Interpolation Between Two Data Points", fontsize=10, pad=10)
+def save_latent_sweep_figure(
+    model: "VAE",
+    device: torch.device,
+    out_path: str,
+    sweep_steps: int = 15,
+    sweep_range: tuple[float, float] = (-3.0, 3.0),
+):
+    """Create latent space sweep figure showing each dimension independently."""
+    latent_dim = model.config.latent_dim
+    
+    with model_inference(model):
+        all_sweep_imgs = []
+        dim_labels = []
+        
+        for dim in range(latent_dim):
+            sweep_values = torch.linspace(sweep_range[0], sweep_range[1], sweep_steps, device=device)
+            z_sweep = torch.zeros(sweep_steps, latent_dim, device=device)
+            z_sweep[:, dim] = sweep_values
+            
+            sweep_imgs = decode_samples(model, z_sweep)
+            all_sweep_imgs.append(sweep_imgs)
+            dim_labels.append(f"z{dim + 1}")
 
-    # Bottom plot: latent sweep
-    ax2.imshow(sweep_grid, cmap="gray")
-    ax2.axis("off")
-    ax2.set_title("Latent Space Sweep (z1 dimension)", fontsize=10, pad=10)
+    fig, axes = plt.subplots(latent_dim, 1, figsize=(sweep_steps, latent_dim * 1.2))
+    
+    if latent_dim == 1:
+        axes = [axes]
+    
+    for dim, (ax, sweep_imgs, label) in enumerate(zip(axes, all_sweep_imgs, dim_labels)):
+        sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
+        
+        ax.imshow(sweep_grid, cmap="gray")
+        ax.axis("off")
+        ax.set_title(f"Latent Space Sweep ({label})", fontsize=10, pad=5)
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
+
+
+def save_interpolation_and_sweep_figures(
+    model: "VAE",
+    loader: DataLoader,
+    device: torch.device,
+    out_path: str,
+    steps: int = 15,
+    method: str = "slerp",
+    sweep_steps: int = 15,
+):
+    """Create separate interpolation and latent sweep figures."""
+    base_path = Path(out_path).stem
+    
+    interp_path = f"{base_path}_interpolation.webp"
+    save_interpolation_figure(model, loader, device, interp_path, steps, method)
+    
+    sweep_path = f"{base_path}_latent_sweep.webp" 
+    save_latent_sweep_figure(model, device, sweep_path, sweep_steps)
 
 
 def _lerp(a: torch.Tensor, b: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -121,7 +157,6 @@ def _slerp(
     a: torch.Tensor, b: torch.Tensor, t: torch.Tensor, eps: float = 1e-6
 ) -> torch.Tensor:
     """Spherical linear interpolation that works for any latent dimensionality."""
-    # Normalize directions for stable angle computation
     a_norm = torch.linalg.norm(a, dim=-1, keepdim=True).clamp_min(eps)
     b_norm = torch.linalg.norm(b, dim=-1, keepdim=True).clamp_min(eps)
     a_dir = a / a_norm
@@ -137,7 +172,6 @@ def _slerp(
 
     out = (s0 * a.unsqueeze(0)) + (s1 * b.unsqueeze(0))
 
-    # Fall back to lerp for small angles
     small_angle = (omega < 1e-2).squeeze(-1)
     if small_angle.any():
         out[small_angle] = _lerp(a, b, t)[small_angle]

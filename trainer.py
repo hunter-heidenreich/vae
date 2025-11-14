@@ -16,8 +16,8 @@ from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
 from plotting import (collect_all_latent_data, compute_kl_per_dimension,
                       save_gradient_diagnostics,
-                      save_interpolation_combined_figure,
-                      save_kl_diagnostics_combined,
+                      save_interpolation_and_sweep_figures,
+                      save_kl_diagnostics_separate,
                       save_latent_combined_figure, save_latent_marginals,
                       save_logvar_combined_figure, save_logvar_marginals,
                       save_recon_figure, save_samples_figure,
@@ -148,12 +148,20 @@ class VAETrainer:
         progress_bar = tqdm(dataloader, desc=f"Training Epoch {epoch}")
 
         for _, (data, _) in enumerate(progress_bar):
-            step_metrics = self._train_step(data, return_metrics=self.global_step % self.config.log_interval == 0)
+            # Compute metrics every log_interval steps (including step 0)
+            should_compute_metrics = (self.global_step % self.config.log_interval == 0)
+            step_metrics = self._train_step(data, return_metrics=should_compute_metrics)
 
-             # Logging
+            # Increment global step counter
+            self.global_step += 1
+
+            # Logging and accumulation
             if step_metrics is not None:
                 metrics_accumulator.add_step(step_metrics)
                 self._log_training_step_from_metrics(step_metrics)
+                
+                # Store step-level metrics in history for detailed analysis
+                self.history.record_step_metrics(step_metrics, self.global_step - 1, is_train=True)
                 
                 # Update progress bar with latest metrics
                 latest_metrics = metrics_accumulator.get_latest()
@@ -261,8 +269,16 @@ class VAETrainer:
 
                 # Compute KL per dimension
                 mu = output.mu
-                logvar = 2 * output.std.log()  # logvar = 2 * log(std)
-                kl_per_dim_batch = compute_kl_per_dimension(mu, logvar)
+                std = output.std
+                # Check if we're using log-variance parameterization
+                is_logvar = not (self.model.config.use_softplus_std or self.model.config.bound_std is not None)
+                if is_logvar:
+                    # std is derived from log-variance, so we need to get the original sigma
+                    logvar = 2 * std.log()  # logvar = 2 * log(std) when std = exp(0.5 * logvar)
+                    kl_per_dim_batch = compute_kl_per_dimension(mu, logvar, is_logvar=True)
+                else:
+                    # std is actual standard deviation
+                    kl_per_dim_batch = compute_kl_per_dimension(mu, std, is_logvar=False)
 
                 if kl_per_dim_accum is None:
                     kl_per_dim_accum = kl_per_dim_batch.clone()
@@ -396,8 +412,8 @@ class VAETrainer:
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
 
-        # Combined interpolation figure (between examples + latent sweep)
-        save_interpolation_combined_figure(
+        # Interpolation and latent sweep figures (creates separate files)
+        save_interpolation_and_sweep_figures(
             self.model,
             test_loader,
             self.device,
@@ -409,7 +425,7 @@ class VAETrainer:
 
         # Latent space analysis (mean and log variance) - OPTIMIZED: Single pass over data
         print("Collecting latent space data (single pass)...")
-        Z, Mu, LogVar, Y = collect_all_latent_data(
+        Z, Mu, Std, Y = collect_all_latent_data(
             self.model,
             test_loader,
             self.device,
@@ -422,7 +438,8 @@ class VAETrainer:
         )
         save_latent_marginals(Z, os.path.join(self.fig_dir, "mnist-1d-hists.webp"))
         
-        # Log variance (sigma/logvar) plots
+        # Log variance (sigma/logvar) plots - convert std to logvar
+        LogVar = np.log(Std ** 2)  # Convert std to log variance
         save_logvar_combined_figure(
             LogVar, Y, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
         )
@@ -432,20 +449,22 @@ class VAETrainer:
         save_training_curves(
             self.history.get_train_history(),
             self.history.get_val_history(),
-            os.path.join(self.fig_dir, "losses.webp"),
+            self.history.get_train_step_history(),
+            self.fig_dir,
         )
 
         # Gradient diagnostics (only if gradient analysis was enabled)
         if self.config.analyze_gradients:
             save_gradient_diagnostics(
                 self.history.get_train_history(),
-                os.path.join(self.fig_dir, "grad-diagnostics.webp"),
+                self.history.get_train_step_history(),
+                self.fig_dir,
             )
 
-        # KL per dimension diagnostics
-        save_kl_diagnostics_combined(
+        # KL per dimension diagnostics (now creates separate plots)
+        save_kl_diagnostics_separate(
             self.history.get_val_history(),
-            os.path.join(self.fig_dir, "kl-diagnostics-combined.webp"),
+            self.fig_dir,
         )
 
         print(f"Analysis plots saved to {self.fig_dir}")
@@ -602,6 +621,7 @@ class VAETrainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "train_history": self.history.get_train_history(),
             "val_history": self.history.get_val_history(),
+            "train_step_history": self.history.get_train_step_history(),
             "config": self.config,
             "is_best": is_best,
         }
@@ -629,8 +649,10 @@ class VAETrainer:
         # Load history into the TrainingHistory object
         train_history = checkpoint.get("train_history", {})
         val_history = checkpoint.get("val_history", {})
+        train_step_history = checkpoint.get("train_step_history", {})
         self.history.train_history = train_history
         self.history.val_history = val_history
+        self.history.train_step_history = train_step_history
 
         return checkpoint
 
@@ -695,3 +717,7 @@ class VAETrainer:
     def get_val_history(self) -> dict[str, Any]:
         """Get validation history."""
         return self.history.get_val_history()
+
+    def get_train_step_history(self) -> dict[str, Any]:
+        """Get training step-level history."""
+        return self.history.get_train_step_history()

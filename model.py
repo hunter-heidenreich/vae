@@ -14,9 +14,11 @@ def get_activation(activation: str) -> nn.Module:
         "relu": nn.ReLU(),
         "tanh": nn.Tanh(),
         "sigmoid": nn.Sigmoid(),
+        "leakyrelu": nn.LeakyReLU(),
         "leaky_relu": nn.LeakyReLU(),
         "elu": nn.ELU(),
         "gelu": nn.GELU(),
+        "silu": nn.SiLU(),
     }
     if activation_lower not in ACTIVATION_MAP:
         supported = ", ".join(ACTIVATION_MAP.keys())
@@ -33,6 +35,7 @@ class VAEConfig:
     input_shape: tuple[int, int, int] = (1, 28, 28)  # Default: MNIST
     activation: str = "tanh"  # Default: tanh, what was used in the original VAE paper 
     use_softplus_std: bool = False  # Whether to use softplus for std parameterization
+    bound_std: float | None = None  # Optional upper bound for std deviation; when not None, caps std with sigmoid * bound_std
     n_samples: int = 1  # Number of latent samples per input during training
 
 
@@ -80,10 +83,12 @@ class VAE(nn.Module):
             nn.Unflatten(1, config.input_shape),
         )
         
-    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor, true_std: bool=False) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode input to latent distribution parameters."""
         encoder_output = self.encoder(x)
         mu, sigma = torch.chunk(encoder_output, 2, dim=-1)
+        if true_std:
+            sigma = self._sigma_to_std(sigma, eps=self.DEFAULT_EPS)
         return mu, sigma
     
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -150,7 +155,9 @@ class VAE(nn.Module):
     
     def _sigma_to_std(self, sigma: torch.Tensor, eps: float = DEFAULT_EPS) -> torch.Tensor:
         """Convert sigma parameter to standard deviation."""
-        if self.config.use_softplus_std:
+        if self.config.bound_std is not None:
+            return torch.sigmoid(sigma) * self.config.bound_std + eps
+        elif self.config.use_softplus_std:
             return F.softplus(sigma) + eps
         else:
             return torch.exp(0.5 * sigma)  # sigma represents log-variance
@@ -209,10 +216,11 @@ class VAE(nn.Module):
     ) -> torch.Tensor:
         """Compute KL divergence between latent distribution and standard normal prior."""
         # Analytical KL: KL(N(μ,σ²) || N(0,1)) = 0.5 * Σ(μ² + σ² - 1 - log(σ²))
-        if self.config.use_softplus_std:
+        if self.config.use_softplus_std or self.config.bound_std is not None:
             # sigma is just the raw output, need to use std directly: σ
+            variance = std.pow(2)
             kl_per_sample = 0.5 * torch.sum(
-                mu.pow(2) + std.pow(2) - 1 - torch.log(std.pow(2) + eps), dim=1
+                mu.pow(2) + variance - 1 - torch.log(variance + eps), dim=1
             )
         else:
             # sigma represents log-variance parameterization: log(σ²)

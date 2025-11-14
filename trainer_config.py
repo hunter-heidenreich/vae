@@ -19,7 +19,7 @@ class TrainerConfig:
 
     # Logging and checkpointing
     run_dir: str | None = None
-    log_interval: int = 100
+    log_interval: int = 5
     checkpoint_interval: int = 5
 
     # Performance and analysis options
