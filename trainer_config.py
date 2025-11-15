@@ -16,6 +16,7 @@ class TrainerConfig:
     num_epochs: int = 10
     batch_size: int = 100
     max_grad_norm: float | None = None
+    warmup_steps: int = 0
 
     # Logging and checkpointing
     run_dir: str | None = None

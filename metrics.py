@@ -30,6 +30,7 @@ class MetricsAccumulator:
             "kl",
             "grad_norm_realized",
             "grad_norm_unclipped",
+            "learning_rate",
         }
 
         # Define gradient analysis metrics
@@ -154,7 +155,7 @@ class TrainingHistory:
         if not is_train:
             # We don't record step-level metrics for validation
             return
-            
+
         # Always record the step
         self.train_step_history.setdefault("step", []).append(step)
 

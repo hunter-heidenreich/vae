@@ -1,8 +1,6 @@
 import argparse
 import json
 import os
-import sys
-from datetime import datetime
 
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -99,6 +97,12 @@ def parse_args():
         type=float,
         default=None,
         help="Maximum gradient norm for clipping; set to None to disable (default: None)",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=0,
+        help="Number of steps to linearly warm up learning rate (default: 0 - no warmup)",
     )
 
     # VAE-specific options
@@ -211,6 +215,7 @@ def main():
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
         max_grad_norm=args.max_grad_norm,
+        warmup_steps=args.warmup_steps,
         run_dir=args.run_dir,
         log_interval=args.log_interval,
         checkpoint_interval=args.checkpoint_interval,
@@ -249,18 +254,18 @@ def main():
     # Save CLI arguments and configurations for tracking
     args_dict = vars(args)
     args_file = os.path.join(trainer.run_dir, "cli_args.json")
-    with open(args_file, 'w') as f:
+    with open(args_file, "w") as f:
         json.dump(args_dict, f, indent=2, default=str)
     print(f"CLI arguments saved to: {args_file}")
-    
+
     # Save full configuration (trainer + model configs)
     config_dict = {
         "trainer_config": trainer_config.__dict__,
         "model_config": model_config.__dict__,
-        "cli_args": args_dict
+        "cli_args": args_dict,
     }
     config_file = os.path.join(trainer.run_dir, "full_config.json")
-    with open(config_file, 'w') as f:
+    with open(config_file, "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
     print(f"Full configuration saved to: {config_file}")
 

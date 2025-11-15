@@ -76,7 +76,11 @@ def collect_latents_with_std(
             if max_batches is not None and (bidx + 1) >= max_batches:
                 break
 
-    return np.concatenate(mus, axis=0), np.concatenate(stds, axis=0), np.concatenate(ys, axis=0)
+    return (
+        np.concatenate(mus, axis=0),
+        np.concatenate(stds, axis=0),
+        np.concatenate(ys, axis=0),
+    )
 
 
 def collect_all_latent_data(
@@ -87,7 +91,7 @@ def collect_all_latent_data(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Efficiently collect all latent data in a single pass over the dataloader.
-    
+
     This combines the functionality of collect_latents() and collect_latents_with_std()
     to eliminate redundant data loading and model inference passes.
 
@@ -112,13 +116,13 @@ def collect_all_latent_data(
     with model_inference(model):
         for bidx, (data, target) in enumerate(dataloader):
             data = data.to(device)
-            
+
             # Get mu and std from encoder (consistent with collect_latents_with_std)
             mu, std = model.encode(data, true_std=True)
-            
+
             # Sample z using reparameterization
             z = model.reparameterize(mu, std)
-            
+
             # Collect all data
             z_samples.append(z.cpu().numpy())
             mus.append(mu.cpu().numpy())
@@ -130,13 +134,15 @@ def collect_all_latent_data(
 
     return (
         np.concatenate(z_samples, axis=0),
-        np.concatenate(mus, axis=0), 
+        np.concatenate(mus, axis=0),
         np.concatenate(stds, axis=0),
-        np.concatenate(ys, axis=0)
+        np.concatenate(ys, axis=0),
     )
 
 
-def compute_kl_per_dimension(mu: torch.Tensor, variance_param: torch.Tensor, is_logvar: bool = True) -> torch.Tensor:
+def compute_kl_per_dimension(
+    mu: torch.Tensor, variance_param: torch.Tensor, is_logvar: bool = True
+) -> torch.Tensor:
     """
     Compute KL divergence for each latent dimension separately.
 
@@ -155,6 +161,6 @@ def compute_kl_per_dimension(mu: torch.Tensor, variance_param: torch.Tensor, is_
         # variance_param is std, so variance = std^2
         variance = variance_param.pow(2)
         kl_per_dim = 0.5 * (mu.pow(2) + variance - 1 - torch.log(variance))
-    
+
     # Average across batch dimension
     return kl_per_dim.mean(dim=0)

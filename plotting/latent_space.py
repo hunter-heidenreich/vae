@@ -97,7 +97,9 @@ def save_logvar_marginals(LogVar: np.ndarray, out_path: str):
     with figure_context((8, 5), out_path):
         colors = get_colormap_colors(latent_dim)
         for i in range(latent_dim):
-            sns.kdeplot(LogVar[:, i], label=f"logvar{i + 1}", color=colors[i], linewidth=2)
+            sns.kdeplot(
+                LogVar[:, i], label=f"logvar{i + 1}", color=colors[i], linewidth=2
+            )
 
         plt.xlabel("Log Variance Value")
         plt.ylabel("Density")
@@ -131,7 +133,9 @@ def save_logvar_combined_figure(LogVar: np.ndarray, Y: np.ndarray, out_path: str
     ax = axs[1]
     plt.sca(ax)  # Set current axis
     if latent_dim == 1:
-        sns.histplot(LogVar[:, 0], kde=True, stat="density", alpha=0.7, color="steelblue")
+        sns.histplot(
+            LogVar[:, 0], kde=True, stat="density", alpha=0.7, color="steelblue"
+        )
         plt.xlabel("logvar1")
         plt.ylabel("Density")
         plt.title("Log Variance 1D distribution")

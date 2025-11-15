@@ -116,11 +116,32 @@ class VAETrainer:
         """Count trainable parameters in the model."""
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
+    def _get_current_lr(self) -> float:
+        """
+        Get current learning rate with linear warmup.
+
+        Returns:
+            Current learning rate based on global step and warmup configuration
+        """
+        if (
+            self.config.warmup_steps <= 0
+            or self.global_step >= self.config.warmup_steps
+        ):
+            # No warmup or warmup period finished
+            return self.config.learning_rate
+
+        # Linear warmup: lr = base_lr * ((current_step + 1) / warmup_steps)
+        # We add 1 to current_step so that step 0 has lr > 0
+        warmup_factor = (self.global_step + 1) / self.config.warmup_steps
+        current_lr = self.config.learning_rate * warmup_factor
+
+        return current_lr
+
     def _compute_grad_norm(self, gradients: list[torch.Tensor]) -> float:
         """Compute L2 norm of a list of gradients efficiently."""
         if not gradients:
             return 0.0
-        # Use a generator expression with Python's sum to avoid 
+        # Use a generator expression with Python's sum to avoid
         # creating intermediate tensor via torch.stack
         # Start with first gradient's squared norm to ensure we have a tensor
         grad_iter = iter(gradients)
@@ -149,7 +170,7 @@ class VAETrainer:
 
         for _, (data, _) in enumerate(progress_bar):
             # Compute metrics every log_interval steps (including step 0)
-            should_compute_metrics = (self.global_step % self.config.log_interval == 0)
+            should_compute_metrics = self.global_step % self.config.log_interval == 0
             step_metrics = self._train_step(data, return_metrics=should_compute_metrics)
 
             # Increment global step counter
@@ -159,10 +180,12 @@ class VAETrainer:
             if step_metrics is not None:
                 metrics_accumulator.add_step(step_metrics)
                 self._log_training_step_from_metrics(step_metrics)
-                
+
                 # Store step-level metrics in history for detailed analysis
-                self.history.record_step_metrics(step_metrics, self.global_step - 1, is_train=True)
-                
+                self.history.record_step_metrics(
+                    step_metrics, self.global_step - 1, is_train=True
+                )
+
                 # Update progress bar with latest metrics
                 latest_metrics = metrics_accumulator.get_latest()
                 progress_bar.set_postfix(
@@ -171,6 +194,7 @@ class VAETrainer:
                         "Recon": f"{latest_metrics.get('recon', 0):.3f}",
                         "KL": f"{latest_metrics.get('kl', 0):.3f}",
                         "GNorm": f"{latest_metrics.get('grad_norm_realized', 0):.2f}",
+                        "LR": f"{latest_metrics.get('learning_rate', 0):.1e}",
                     }
                 )
 
@@ -180,7 +204,9 @@ class VAETrainer:
 
         return metrics_accumulator.get_count()
 
-    def _train_step(self, data: torch.Tensor, return_metrics: bool = False) -> dict[str, float] | None:
+    def _train_step(
+        self, data: torch.Tensor, return_metrics: bool = False
+    ) -> dict[str, float] | None:
         """
         Execute a single training step and return metrics.
 
@@ -206,6 +232,11 @@ class VAETrainer:
         if return_metrics and self.config.analyze_gradients:
             step_grad_metrics = self._compute_gradient_metrics(output)
 
+        # Get current learning rate for warmup (do this BEFORE backward pass to capture correct LR)
+        current_lr = self._get_current_lr()
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = current_lr
+
         # Backward pass
         output.loss.backward()
 
@@ -214,7 +245,7 @@ class VAETrainer:
 
         # Optimizer step
         self.optimizer.step()
-        
+
         if not return_metrics:
             return
 
@@ -225,6 +256,7 @@ class VAETrainer:
             "kl": output.loss_kl.item(),
             "grad_norm_realized": grad_norms["realized"],
             "grad_norm_unclipped": grad_norms["unclipped"],
+            "learning_rate": current_lr,
         }
 
         # Add gradient analysis metrics if enabled
@@ -271,14 +303,23 @@ class VAETrainer:
                 mu = output.mu
                 std = output.std
                 # Check if we're using log-variance parameterization
-                is_logvar = not (self.model.config.use_softplus_std or self.model.config.bound_std is not None)
+                is_logvar = not (
+                    self.model.config.use_softplus_std
+                    or self.model.config.bound_std is not None
+                )
                 if is_logvar:
                     # std is derived from log-variance, so we need to get the original sigma
-                    logvar = 2 * std.log()  # logvar = 2 * log(std) when std = exp(0.5 * logvar)
-                    kl_per_dim_batch = compute_kl_per_dimension(mu, logvar, is_logvar=True)
+                    logvar = (
+                        2 * std.log()
+                    )  # logvar = 2 * log(std) when std = exp(0.5 * logvar)
+                    kl_per_dim_batch = compute_kl_per_dimension(
+                        mu, logvar, is_logvar=True
+                    )
                 else:
                     # std is actual standard deviation
-                    kl_per_dim_batch = compute_kl_per_dimension(mu, std, is_logvar=False)
+                    kl_per_dim_batch = compute_kl_per_dimension(
+                        mu, std, is_logvar=False
+                    )
 
                 if kl_per_dim_accum is None:
                     kl_per_dim_accum = kl_per_dim_batch.clone()
@@ -431,19 +472,21 @@ class VAETrainer:
             self.device,
             max_batches=self.config.max_latent_batches,
         )
-        
+
         # Mean (mu) plots - using Z (sampled latents) for visualization
         save_latent_combined_figure(
             Z, Y, os.path.join(self.fig_dir, "mnist-2d-combined.webp")
         )
         save_latent_marginals(Z, os.path.join(self.fig_dir, "mnist-1d-hists.webp"))
-        
+
         # Log variance (sigma/logvar) plots - convert std to logvar
-        LogVar = np.log(Std ** 2)  # Convert std to log variance
+        LogVar = np.log(Std**2)  # Convert std to log variance
         save_logvar_combined_figure(
             LogVar, Y, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
         )
-        save_logvar_marginals(LogVar, os.path.join(self.fig_dir, "mnist-logvar-1d-hists.webp"))
+        save_logvar_marginals(
+            LogVar, os.path.join(self.fig_dir, "mnist-logvar-1d-hists.webp")
+        )
 
         # Training curves
         save_training_curves(
@@ -545,9 +588,7 @@ class VAETrainer:
             Dictionary with 'realized' and 'unclipped' gradient norms
         """
         # Get all parameters that have gradients
-        params = [
-            p for p in self.model.parameters() if p.grad is not None
-        ]
+        params = [p for p in self.model.parameters() if p.grad is not None]
         if not params:
             # Handle edge case of no gradients
             return {"realized": 0.0, "unclipped": 0.0}
@@ -556,7 +597,7 @@ class VAETrainer:
         # if no clipping is desired.
         max_norm = self.config.max_grad_norm
         if max_norm is None:
-            max_norm = float('inf')
+            max_norm = float("inf")
 
         # clip_grad_norm_ computes and returns the total unclipped norm
         # This is the only norm computation we need - no redundant work!
@@ -578,7 +619,7 @@ class VAETrainer:
         # Combined mappings for cleaner code
         all_mappings = {
             "loss": "Loss/Train",
-            "recon": "Loss/Train/BCE", 
+            "recon": "Loss/Train/BCE",
             "kl": "Loss/Train/KLD",
             "grad_norm_realized": "GradNorm/Train/Realized",
             "grad_norm_unclipped": "GradNorm/Train/Unclipped",
@@ -587,11 +628,14 @@ class VAETrainer:
             "recon_kl_cosine": "GradAlignment/Train/ReconKlCosine",
             "recon_contrib": "GradContribution/Train/Recon",
             "kl_contrib": "GradContribution/Train/Kl",
+            "learning_rate": "LearningRate/Train",
         }
-        
+
         for metric_key, tb_name in all_mappings.items():
             if metric_key in step_metrics:
-                self.writer.add_scalar(tb_name, step_metrics[metric_key], self.global_step)
+                self.writer.add_scalar(
+                    tb_name, step_metrics[metric_key], self.global_step
+                )
 
     def _log_validation_step(self, val_metrics: dict[str, float]):
         """Log validation step metrics to TensorBoard."""
@@ -603,7 +647,9 @@ class VAETrainer:
 
         for metric_key, tb_name in val_mappings.items():
             if metric_key in val_metrics:
-                self.writer.add_scalar(tb_name, val_metrics[metric_key], self.global_step)
+                self.writer.add_scalar(
+                    tb_name, val_metrics[metric_key], self.global_step
+                )
 
     def save_checkpoint(self, epoch: int, filepath: str, is_best: bool = False):
         """
@@ -659,16 +705,16 @@ class VAETrainer:
     def save_performance_metrics(self, filepath: str):
         """
         Save final performance metrics to JSON file.
-        
+
         Args:
             filepath: Path to save the performance metrics JSON
         """
         import json
         from datetime import datetime
-        
+
         # Get model parameter count
         param_count = self._count_parameters()
-        
+
         # Prepare performance data
         performance_data = {
             "timestamp": datetime.now().isoformat(),
@@ -687,22 +733,34 @@ class VAETrainer:
             },
             "final_metrics": {
                 "epoch": self.config.num_epochs,
-                "total_loss": self.final_val_metrics["loss"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
-                "reconstruction_loss": self.final_val_metrics["recon"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
-                "kl_loss": self.final_val_metrics["kl"] if hasattr(self, 'final_val_metrics') and self.final_val_metrics else None,
+                "total_loss": self.final_val_metrics["loss"]
+                if hasattr(self, "final_val_metrics") and self.final_val_metrics
+                else None,
+                "reconstruction_loss": self.final_val_metrics["recon"]
+                if hasattr(self, "final_val_metrics") and self.final_val_metrics
+                else None,
+                "kl_loss": self.final_val_metrics["kl"]
+                if hasattr(self, "final_val_metrics") and self.final_val_metrics
+                else None,
             },
             "best_metrics": {
-                "total_loss": self.best_val_metrics["loss"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
-                "reconstruction_loss": self.best_val_metrics["recon"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
-                "kl_loss": self.best_val_metrics["kl"] if hasattr(self, 'best_val_metrics') and self.best_val_metrics else None,
+                "total_loss": self.best_val_metrics["loss"]
+                if hasattr(self, "best_val_metrics") and self.best_val_metrics
+                else None,
+                "reconstruction_loss": self.best_val_metrics["recon"]
+                if hasattr(self, "best_val_metrics") and self.best_val_metrics
+                else None,
+                "kl_loss": self.best_val_metrics["kl"]
+                if hasattr(self, "best_val_metrics") and self.best_val_metrics
+                else None,
             },
         }
-        
+
         # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
+
         # Save to JSON
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(performance_data, f, indent=2, default=str)
 
     def close(self):

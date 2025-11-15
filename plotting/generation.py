@@ -81,7 +81,7 @@ def save_interpolation_figure(
         interp_imgs = decode_samples(model, zs)
 
     interp_grid = grid_from_images(interp_imgs, 1, steps)
-    
+
     with figure_context((steps, 1.5), out_path):
         plt.imshow(interp_grid, cmap="gray")
         plt.axis("off")
@@ -97,28 +97,32 @@ def save_latent_sweep_figure(
 ):
     """Create latent space sweep figure showing each dimension independently."""
     latent_dim = model.config.latent_dim
-    
+
     with model_inference(model):
         all_sweep_imgs = []
         dim_labels = []
-        
+
         for dim in range(latent_dim):
-            sweep_values = torch.linspace(sweep_range[0], sweep_range[1], sweep_steps, device=device)
+            sweep_values = torch.linspace(
+                sweep_range[0], sweep_range[1], sweep_steps, device=device
+            )
             z_sweep = torch.zeros(sweep_steps, latent_dim, device=device)
             z_sweep[:, dim] = sweep_values
-            
+
             sweep_imgs = decode_samples(model, z_sweep)
             all_sweep_imgs.append(sweep_imgs)
             dim_labels.append(f"z{dim + 1}")
 
     fig, axes = plt.subplots(latent_dim, 1, figsize=(sweep_steps, latent_dim * 1.2))
-    
+
     if latent_dim == 1:
         axes = [axes]
-    
-    for dim, (ax, sweep_imgs, label) in enumerate(zip(axes, all_sweep_imgs, dim_labels)):
+
+    for dim, (ax, sweep_imgs, label) in enumerate(
+        zip(axes, all_sweep_imgs, dim_labels)
+    ):
         sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
-        
+
         ax.imshow(sweep_grid, cmap="gray")
         ax.axis("off")
         ax.set_title(f"Latent Space Sweep ({label})", fontsize=10, pad=5)
@@ -139,11 +143,11 @@ def save_interpolation_and_sweep_figures(
 ):
     """Create separate interpolation and latent sweep figures."""
     base_path = Path(out_path).stem
-    
+
     interp_path = f"{base_path}_interpolation.webp"
     save_interpolation_figure(model, loader, device, interp_path, steps, method)
-    
-    sweep_path = f"{base_path}_latent_sweep.webp" 
+
+    sweep_path = f"{base_path}_latent_sweep.webp"
     save_latent_sweep_figure(model, device, sweep_path, sweep_steps)
 
 

@@ -7,12 +7,14 @@ from matplotlib.collections import LineCollection
 from .core import DEFAULT_DPI
 
 
-def save_training_curves(train_history: dict, test_history: dict, train_step_history: dict, fig_dir: str):
+def save_training_curves(
+    train_history: dict, test_history: dict, train_step_history: dict, fig_dir: str
+):
     """Save separate training curve plots for epoch-level and step-level data."""
-    
+
     # Save epoch-level plots
     _save_epoch_training_curves(train_history, test_history, fig_dir)
-    
+
     # Save step-level plots if available
     if train_step_history and train_step_history.get("step"):
         _save_step_training_curves(train_step_history, fig_dir)
@@ -47,12 +49,44 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
         test_kl_arr = np.asarray(test_history["kl"], dtype=float)
 
     # Create separate plots
-    
-    # 1. ELBO plot
+
+    # 1. Learning Rate plot (if available)
+    if train_history.get("learning_rate"):
+        train_lr_arr = np.asarray(train_history["learning_rate"], dtype=float)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(
+            train_epochs,
+            train_lr_arr,
+            "-",
+            label="Learning Rate",
+            alpha=0.8,
+            linewidth=2,
+            color="purple",
+        )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Learning Rate")
+        ax.set_title("Learning Rate Schedule")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale("log")  # Use log scale for better visualization
+        plt.tight_layout()
+        plt.savefig(f"{fig_dir}/learning_rate_epochs.webp", dpi=DEFAULT_DPI)
+        plt.close()
+
+    # 2. ELBO plot
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(train_epochs, -train_loss_arr, "-", label="Train ELBO", alpha=0.8, linewidth=2)
+    ax.plot(
+        train_epochs, -train_loss_arr, "-", label="Train ELBO", alpha=0.8, linewidth=2
+    )
     if len(test_epochs) > 0:
-        ax.plot(test_epochs, -test_loss_arr, "o-", label="Test ELBO", alpha=0.8, markersize=4)
+        ax.plot(
+            test_epochs,
+            -test_loss_arr,
+            "o-",
+            label="Test ELBO",
+            alpha=0.8,
+            markersize=4,
+        )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("ELBO")
     ax.set_title("ELBO (Higher is Better)")
@@ -62,11 +96,15 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     plt.savefig(f"{fig_dir}/elbo_epochs.webp", dpi=DEFAULT_DPI)
     plt.close()
 
-    # 2. Reconstruction loss plot
+    # 3. Reconstruction loss plot
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(train_epochs, train_recon_arr, "-", label="Train BCE", alpha=0.8, linewidth=2)
+    ax.plot(
+        train_epochs, train_recon_arr, "-", label="Train BCE", alpha=0.8, linewidth=2
+    )
     if len(test_epochs) > 0:
-        ax.plot(test_epochs, test_recon_arr, "o-", label="Test BCE", alpha=0.8, markersize=4)
+        ax.plot(
+            test_epochs, test_recon_arr, "o-", label="Test BCE", alpha=0.8, markersize=4
+        )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("BCE Loss")
     ax.set_title("Reconstruction Loss")
@@ -76,11 +114,13 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     plt.savefig(f"{fig_dir}/reconstruction_loss_epochs.webp", dpi=DEFAULT_DPI)
     plt.close()
 
-    # 3. KL divergence plot
+    # 4. KL divergence plot
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(train_epochs, train_kl_arr, "-", label="Train KL", alpha=0.8, linewidth=2)
     if len(test_epochs) > 0:
-        ax.plot(test_epochs, test_kl_arr, "o-", label="Test KL", alpha=0.8, markersize=4)
+        ax.plot(
+            test_epochs, test_kl_arr, "o-", label="Test KL", alpha=0.8, markersize=4
+        )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("KL Loss")
     ax.set_title("KL Divergence")
@@ -90,7 +130,7 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     plt.savefig(f"{fig_dir}/kl_loss_epochs.webp", dpi=DEFAULT_DPI)
     plt.close()
 
-    # 4. Loss scatter plot (BCE vs KL from test data colored by epoch)
+    # 5. Loss scatter plot (BCE vs KL from test data colored by epoch)
     if len(test_epochs) > 0:
         fig, ax = plt.subplots(figsize=(10, 8))
         _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr)
@@ -103,13 +143,29 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     """Save step-level training curves as separate plots."""
     if not train_step_history.get("step"):
         return
-        
+
     steps = np.asarray(train_step_history["step"], dtype=float)
     loss_arr = np.asarray(train_step_history["loss"], dtype=float)
     recon_arr = np.asarray(train_step_history["recon"], dtype=float)
     kl_arr = np.asarray(train_step_history["kl"], dtype=float)
-    
-    # 1. ELBO step plot
+
+    # 1. Learning Rate step plot (if available)
+    if train_step_history.get("learning_rate"):
+        lr_arr = np.asarray(train_step_history["learning_rate"], dtype=float)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(
+            steps, lr_arr, "o-", alpha=0.8, markersize=2, linewidth=1, color="purple"
+        )
+        ax.set_xlabel("Training Step")
+        ax.set_ylabel("Learning Rate")
+        ax.set_title("Learning Rate Schedule by Training Step")
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale("log")  # Use log scale for better visualization
+        plt.tight_layout()
+        plt.savefig(f"{fig_dir}/learning_rate_steps.webp", dpi=DEFAULT_DPI)
+        plt.close()
+
+    # 2. ELBO step plot
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(steps, -loss_arr, "o-", alpha=0.8, markersize=3, linewidth=1)
     ax.set_xlabel("Training Step")
@@ -119,10 +175,12 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     plt.tight_layout()
     plt.savefig(f"{fig_dir}/elbo_steps.webp", dpi=DEFAULT_DPI)
     plt.close()
-    
-    # 2. Reconstruction loss step plot
+
+    # 3. Reconstruction loss step plot
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(steps, recon_arr, "o-", alpha=0.8, markersize=3, linewidth=1, color='orange')
+    ax.plot(
+        steps, recon_arr, "o-", alpha=0.8, markersize=3, linewidth=1, color="orange"
+    )
     ax.set_xlabel("Training Step")
     ax.set_ylabel("BCE Loss")
     ax.set_title("Reconstruction Loss by Training Step")
@@ -130,10 +188,10 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     plt.tight_layout()
     plt.savefig(f"{fig_dir}/reconstruction_loss_steps.webp", dpi=DEFAULT_DPI)
     plt.close()
-    
-    # 3. KL step plot
+
+    # 4. KL step plot
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(steps, kl_arr, "o-", alpha=0.8, markersize=3, linewidth=1, color='red')
+    ax.plot(steps, kl_arr, "o-", alpha=0.8, markersize=3, linewidth=1, color="red")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("KL Loss")
     ax.set_title("KL Divergence by Training Step")
@@ -141,11 +199,13 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     plt.tight_layout()
     plt.savefig(f"{fig_dir}/kl_loss_steps.webp", dpi=DEFAULT_DPI)
     plt.close()
-    
-    # 4. Combined step plot for comparison
+
+    # 5. Combined step plot for comparison
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(steps, -loss_arr, "o-", alpha=0.8, markersize=2, linewidth=1, label="ELBO")
-    ax.plot(steps, recon_arr, "s-", alpha=0.8, markersize=2, linewidth=1, label="BCE Loss")
+    ax.plot(
+        steps, recon_arr, "s-", alpha=0.8, markersize=2, linewidth=1, label="BCE Loss"
+    )
     ax.plot(steps, kl_arr, "^-", alpha=0.8, markersize=2, linewidth=1, label="KL Loss")
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Loss")

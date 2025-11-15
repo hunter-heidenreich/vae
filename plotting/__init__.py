@@ -3,15 +3,17 @@
 
 from .core import (decode_samples, figure_context, grid_from_images,
                    model_inference)
-from .data import (apply_pca_if_needed, collect_latents, collect_latents_with_std,
-                   collect_all_latent_data, compute_kl_per_dimension, get_colormap_colors)
-from .training_curves import save_training_curves
+from .data import (apply_pca_if_needed, collect_all_latent_data,
+                   collect_latents, collect_latents_with_std,
+                   compute_kl_per_dimension, get_colormap_colors)
+from .generation import (save_interpolation_and_sweep_figures,
+                         save_interpolation_figure, save_latent_sweep_figure,
+                         save_recon_figure, save_samples_figure)
 from .gradient_analysis import save_gradient_diagnostics
 from .kl_analysis import save_kl_diagnostics_separate
-from .generation import (save_interpolation_and_sweep_figures, save_interpolation_figure,
-                         save_latent_sweep_figure, save_recon_figure, save_samples_figure)
 from .latent_space import (save_latent_combined_figure, save_latent_marginals,
-                          save_logvar_combined_figure, save_logvar_marginals)
+                           save_logvar_combined_figure, save_logvar_marginals)
+from .training_curves import save_training_curves
 
 # For backward compatibility, expose everything that was in plot.py
 __all__ = [
