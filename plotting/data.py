@@ -1,17 +1,14 @@
 """Data processing utilities for plotting."""
 
-from typing import TYPE_CHECKING
-
 import matplotlib.cm as cm
 import numpy as np
 import torch
 from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 
-from .core import DEFAULT_CMAP, model_inference
+from model import VAE
 
-if TYPE_CHECKING:
-    from model import VAE
+from .core import DEFAULT_CMAP, model_inference
 
 
 def apply_pca_if_needed(
@@ -32,59 +29,53 @@ def get_colormap_colors(n_colors: int, cmap_name: str = DEFAULT_CMAP) -> np.ndar
 
 
 def collect_latents(
-    model: "VAE",
+    model: VAE,
     dataloader: DataLoader,
     device: torch.device,
     max_batches: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Collect latent representations and labels from a dataset."""
-    zs: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
+    """Collect latent means and labels from a dataset.
 
-    with model_inference(model):
-        for bidx, (data, target) in enumerate(dataloader):
-            data = data.to(device)
-            mu, _ = model.encode(data)
-            zs.append(mu.cpu().numpy())
-            ys.append(target.numpy())
+    This is a convenience wrapper around ``collect_all_latent_data`` that
+    discards sampled latents and standard deviations.
+    """
+    z_samples, mus, _, ys = collect_all_latent_data(
+        model=model,
+        dataloader=dataloader,
+        device=device,
+        max_batches=max_batches,
+    )
 
-            if max_batches is not None and (bidx + 1) >= max_batches:
-                break
-
-    return np.concatenate(zs, axis=0), np.concatenate(ys, axis=0)
+    # ``collect_all_latent_data`` already computes sampled latents via
+    # reparameterization. For backwards compatibility with the original
+    # implementation of ``collect_latents`` (which returned the encoder
+    # means), we intentionally ignore ``z_samples`` here and return ``mus``.
+    return mus, ys
 
 
 def collect_latents_with_std(
-    model: "VAE",
+    model: VAE,
     dataloader: DataLoader,
     device: torch.device,
     max_batches: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Collect latent representations (mu and std deviation) and labels from a dataset."""
-    mus: list[np.ndarray] = []
-    stds: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
+    """Collect latent means, std deviations, and labels from a dataset.
 
-    with model_inference(model):
-        for bidx, (data, target) in enumerate(dataloader):
-            data = data.to(device)
-            mu, std = model.encode(data, true_std=True)
-            mus.append(mu.cpu().numpy())
-            stds.append(std.cpu().numpy())
-            ys.append(target.numpy())
-
-            if max_batches is not None and (bidx + 1) >= max_batches:
-                break
-
-    return (
-        np.concatenate(mus, axis=0),
-        np.concatenate(stds, axis=0),
-        np.concatenate(ys, axis=0),
+    This is a convenience wrapper around ``collect_all_latent_data`` that
+    discards the sampled latent codes.
+    """
+    _, mus, stds, ys = collect_all_latent_data(
+        model=model,
+        dataloader=dataloader,
+        device=device,
+        max_batches=max_batches,
     )
+
+    return mus, stds, ys
 
 
 def collect_all_latent_data(
-    model: "VAE",
+    model: VAE,
     dataloader: DataLoader,
     device: torch.device,
     max_batches: int | None = None,

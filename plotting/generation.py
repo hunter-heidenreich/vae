@@ -1,11 +1,13 @@
 """Image generation and sampling plots."""
 
-from typing import TYPE_CHECKING, Sized, cast
+from typing import Sized, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+
+from model import VAE
 
 from .core import (
     decode_samples,
@@ -16,21 +18,18 @@ from .core import (
     split_plot_path,
 )
 
-if TYPE_CHECKING:
-    from model import VAE
-
 
 def save_samples_figure(
-    model: "VAE",
-    device,
+    model: VAE,
+    device: torch.device,
     latent_dim: int,
     out_path: str,
-    n: int = 100,
     grid: tuple[int, int] = (10, 10),
 ):
     """Generate and save random samples from the VAE."""
+    n_samples = grid[0] * grid[1]
     with model_inference(model):
-        z = torch.randn((n, latent_dim), device=device)
+        z = torch.randn((n_samples, latent_dim), device=device)
         samples = decode_samples(model, z)
 
     img = grid_from_images(samples, grid[0], grid[1])
@@ -41,9 +40,9 @@ def save_samples_figure(
 
 
 def save_recon_figure(
-    model: "VAE",
+    model: VAE,
     data_batch: torch.Tensor,
-    device,
+    device: torch.device,
     out_path: str,
     n: int = 16,
 ):
@@ -64,7 +63,7 @@ def save_recon_figure(
 
 
 def save_interpolation_figure(
-    model: "VAE",
+    model: VAE,
     loader: DataLoader,
     device: torch.device,
     out_path: str,
@@ -72,69 +71,26 @@ def save_interpolation_figure(
     method: str = "slerp",
 ):
     """Create interpolation figure between two random data points."""
-    ds = loader.dataset  # type: ignore[attr-defined]
-    ds_sized = cast(Sized, ds)
-    idx = torch.randint(0, len(ds_sized), (2,))
-    x0, _ = ds[idx[0].item()]  # type: ignore[index]
-    x1, _ = ds[idx[1].item()]  # type: ignore[index]
-    x = torch.stack([x0, x1], dim=0).to(device)
+    x, z = _get_interpolation_data(model, loader, device)
+    z0, z1 = z[0], z[1]
 
-    with model_inference(model):
-        mu, _ = model.encode(x)
-        z0, z1 = mu[0], mu[1]
-        t = torch.linspace(0, 1, steps, device=device)
-        zs = _slerp(z0, z1, t) if method.lower() == "slerp" else _lerp(z0, z1, t)
-        interp_imgs = decode_samples(model, zs)
+    method_lower = method.lower()
+    if method_lower not in {"slerp", "lerp"}:
+        raise ValueError(
+            f"Unknown interpolation method: {method!r}. Expected 'slerp' or 'lerp'."
+        )
 
-    # Create enhanced figure with original images and embeddings
-    fig_height = 6.5  # More height to prevent cramping
-    fig_width = max(10.0, steps * 0.8)
+    t = torch.linspace(0, 1, steps, device=device)
+    zs = _slerp(z0, z1, t) if method_lower == "slerp" else _lerp(z0, z1, t)
+    interp_imgs = decode_samples(model, zs)
 
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(fig_width, fig_height),
-        gridspec_kw={"height_ratios": [1.5, 1], "hspace": 0.6},
+    _plot_interpolation_figure(
+        x, z, interp_imgs, model.config.input_shape, method, out_path
     )
-
-    # Top row: Original images with embeddings
-    ax_orig = axes[0]
-    orig_imgs = x.view(-1, *model.config.input_shape).cpu()
-    orig_grid = grid_from_images(orig_imgs, 1, 2)
-
-    # Debug: ensure proper image normalization
-    orig_grid = (
-        torch.clamp(orig_grid, 0, 1)
-        if isinstance(orig_grid, torch.Tensor)
-        else np.clip(orig_grid, 0, 1)
-    )
-
-    ax_orig.imshow(orig_grid, cmap="gray", vmin=0, vmax=1)
-    ax_orig.axis("off")
-
-    # Add embedding visualization as colored grids
-    z0_vals = z0.cpu().numpy()
-    z1_vals = z1.cpu().numpy()
-
-    # Create colored grid representations of latent vectors
-    _add_latent_vector_visualization(ax_orig, z0_vals, z1_vals)
-    ax_orig.set_title(
-        "Original Images and Their Latent Embeddings", fontsize=12, pad=15
-    )
-
-    # Bottom row: Interpolation sequence
-    ax_interp = axes[1]
-    interp_grid = grid_from_images(interp_imgs, 1, steps)
-    ax_interp.imshow(interp_grid, cmap="gray")
-    ax_interp.axis("off")
-    ax_interp.set_title(f"{method.upper()} Interpolation Sequence", fontsize=12, pad=10)
-
-    save_figure(out_path)
-    plt.close()
 
 
 def save_latent_sweep_figure(
-    model: "VAE",
+    model: VAE,
     device: torch.device,
     out_path: str,
     sweep_steps: int = 15,
@@ -163,9 +119,7 @@ def save_latent_sweep_figure(
     if latent_dim == 1:
         axes = [axes]
 
-    for dim, (ax, sweep_imgs, label) in enumerate(
-        zip(axes, all_sweep_imgs, dim_labels)
-    ):
+    for ax, sweep_imgs, label in zip(axes, all_sweep_imgs, dim_labels):
         sweep_grid = grid_from_images(sweep_imgs, 1, sweep_steps)
 
         ax.imshow(sweep_grid, cmap="gray")
@@ -177,7 +131,7 @@ def save_latent_sweep_figure(
 
 
 def save_interpolation_and_sweep_figures(
-    model: "VAE",
+    model: VAE,
     loader: DataLoader,
     device: torch.device,
     out_path: str,
@@ -218,13 +172,18 @@ def _slerp(
 
     out = (s0 * a.unsqueeze(0)) + (s1 * b.unsqueeze(0))
 
-    small_angle = (omega < 1e-2).squeeze(-1)
-    if small_angle.any():
-        out[small_angle] = _lerp(a, b, t)[small_angle]
+    # Use LERP for very small angles to avoid numerical instability
+    small_angle_mask = omega.squeeze(-1) < 1e-3
+    if small_angle_mask.any():
+        lerp_result = _lerp(a, b, t)
+        out[small_angle_mask] = lerp_result[small_angle_mask]
+
     return out
 
 
-def _add_latent_vector_visualization(ax, z0_vals, z1_vals):
+def _add_latent_vector_visualization(
+    ax: "plt.Axes", z0_vals: np.ndarray, z1_vals: np.ndarray
+) -> None:
     """Add colored grid visualization of latent vectors below the images."""
     import matplotlib.cm as cm
     from matplotlib.patches import Rectangle
@@ -471,3 +430,64 @@ def _add_latent_vector_visualization(ax, z0_vals, z1_vals):
         fontsize=10,
         clip_on=False,
     )
+
+
+def _get_interpolation_data(
+    model: VAE, loader: DataLoader, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fetch two random data points and their latent representations."""
+    ds = loader.dataset  # type: ignore[attr-defined]
+    ds_sized = cast(Sized, ds)
+    idx = torch.randint(0, len(ds_sized), (2,))
+    x0, _ = ds[idx[0].item()]  # type: ignore[index]
+    x1, _ = ds[idx[1].item()]  # type: ignore[index]
+    x = torch.stack([x0, x1], dim=0).to(device)
+
+    with model_inference(model):
+        mu, _ = model.encode(x)
+    return x, mu
+
+
+def _plot_interpolation_figure(
+    original_images: torch.Tensor,
+    latents: torch.Tensor,
+    interp_imgs: torch.Tensor,
+    input_shape: tuple[int, ...],
+    method: str,
+    out_path: str,
+):
+    """Handle the plotting logic for the interpolation figure."""
+    steps = interp_imgs.shape[0]
+    fig_height = 6.5
+    fig_width = max(10.0, steps * 0.8)
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(fig_width, fig_height),
+        gridspec_kw={"height_ratios": [1.5, 1], "hspace": 0.6},
+    )
+
+    # Top row: Original images and latent vector visualizations
+    ax_orig = axes[0]
+    orig_imgs_grid = grid_from_images(
+        original_images.view(-1, *input_shape).cpu(), 1, 2
+    )
+    ax_orig.imshow(np.clip(orig_imgs_grid, 0, 1), cmap="gray", vmin=0, vmax=1)
+    ax_orig.axis("off")
+    ax_orig.set_title(
+        "Original Images and Their Latent Embeddings", fontsize=12, pad=15
+    )
+
+    z0_vals, z1_vals = latents[0].cpu().numpy(), latents[1].cpu().numpy()
+    _add_latent_vector_visualization(ax_orig, z0_vals, z1_vals)
+
+    # Bottom row: Interpolation sequence
+    ax_interp = axes[1]
+    interp_grid = grid_from_images(interp_imgs, 1, steps)
+    ax_interp.imshow(interp_grid, cmap="gray")
+    ax_interp.axis("off")
+    ax_interp.set_title(f"{method.upper()} Interpolation Sequence", fontsize=12, pad=10)
+
+    save_figure(out_path)
+    plt.close()

@@ -1,15 +1,12 @@
 """Core plotting utilities and base functionality."""
 
-import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import torch
 
-if TYPE_CHECKING:
-    from model import VAE
+from model import VAE
 
 # Constants
 MNIST_SHAPE = (1, 28, 28)
@@ -20,8 +17,7 @@ DEFAULT_ALPHA = 0.8
 
 
 @contextmanager
-def model_inference(model: "VAE"):
-    """Context manager for model evaluation and no_grad."""
+def model_inference(model: VAE):
     model.eval()
     with torch.no_grad():
         yield
@@ -34,7 +30,6 @@ def figure_context(
     dpi: int = DEFAULT_DPI,
     format: str = DEFAULT_FORMAT,
 ):
-    """Context manager for matplotlib figure creation and saving."""
     plt.figure(figsize=figsize)
     try:
         yield
@@ -43,13 +38,11 @@ def figure_context(
         plt.close()
 
 
-def decode_samples(model: "VAE", z: torch.Tensor) -> torch.Tensor:
-    """Decode latent vectors and reshape to MNIST format."""
+def decode_samples(model: VAE, z: torch.Tensor) -> torch.Tensor:
     return torch.sigmoid(model.decode(z)).view(-1, *MNIST_SHAPE)
 
 
 def grid_from_images(imgs: torch.Tensor, nrow: int, ncol: int) -> torch.Tensor:
-    """Create a HxWxC image grid from a batch of images."""
     imgs = imgs.detach().cpu().clamp(0, 1)
     N, C, H, W = imgs.shape
     canvas = torch.zeros((C, nrow * H, ncol * W))
@@ -72,31 +65,16 @@ def save_figure(
     ensure_dir: bool = True,
     bbox_inches: str = "tight",
 ) -> None:
-    """
-    Save the current figure with consistent settings.
-
-    Args:
-        out_path: Output file path
-        dpi: DPI for the saved image
-        format: Image format (webp, png, jpg, etc.)
-        ensure_dir: Whether to create output directory if it doesn't exist
-        bbox_inches: Bounding box behavior for saving
-    """
-    # Ensure output path uses consistent format
     path_obj = Path(out_path)
     if format and not path_obj.suffix:
         out_path = str(path_obj.with_suffix(f".{format}"))
     elif format and path_obj.suffix != f".{format}":
         out_path = str(path_obj.with_suffix(f".{format}"))
 
-    # Create directory if needed
     if ensure_dir:
-        os.makedirs(Path(out_path).parent, exist_ok=True)
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Apply tight layout before saving
     plt.tight_layout()
-
-    # Save with consistent settings
     plt.savefig(out_path, dpi=dpi, format=format, bbox_inches=bbox_inches)
 
 
@@ -107,15 +85,6 @@ def subplot_context(
     dpi: int = DEFAULT_DPI,
     format: str = DEFAULT_FORMAT,
 ):
-    """
-    Context manager for multi-panel figures with consistent saving.
-
-    Args:
-        figsize: Figure size as (width, height)
-        out_path: Output file path
-        dpi: DPI for the saved image
-        format: Image format
-    """
     fig = plt.figure(figsize=figsize)
     try:
         yield fig
@@ -131,40 +100,21 @@ def make_plot_path(
     format: str = DEFAULT_FORMAT,
     group_dir: str = "",
 ) -> str:
-    """
-    Create a standardized plot file path with optional grouping.
-
-    Args:
-        fig_dir: Base directory for figures
-        base_name: Base name for the plot (e.g., 'latent_space', 'training_curves')
-        suffix: Optional suffix (e.g., 'epochs', 'steps', '2d', 'combined')
-        format: File format extension
-        group_dir: Optional subdirectory for grouping related plots
-
-    Returns:
-        Full path to the plot file
-    """
+    """Create a standardized plot file path with optional grouping."""
     if suffix:
         filename = f"{base_name}_{suffix}.{format}"
     else:
         filename = f"{base_name}.{format}"
 
+    base_path = Path(fig_dir)
     if group_dir:
-        return os.path.join(fig_dir, group_dir, filename)
+        return str(base_path / group_dir / filename)
     else:
-        return os.path.join(fig_dir, filename)
+        return str(base_path / filename)
 
 
 def split_plot_path(out_path: str, suffix: str) -> str:
-    """
-    Create a related plot path by adding a suffix to the base name.
-
-    Args:
-        out_path: Original output path
-        suffix: Suffix to add to the base name
-
-    Returns:
-        New path with suffix added
+    """Create a related plot path by adding a suffix to the base name.
 
     Example:
         split_plot_path("/path/figures/interpolation.webp", "latent_sweep")
@@ -183,17 +133,4 @@ def make_grouped_plot_path(
     suffix: str = "",
     format: str = DEFAULT_FORMAT,
 ) -> str:
-    """
-    Create a plot path within a specific group subdirectory.
-
-    Args:
-        fig_dir: Base directory for figures
-        group: Group name (subdirectory)
-        base_name: Base name for the plot
-        suffix: Optional suffix
-        format: File format extension
-
-    Returns:
-        Full path to the plot file in the group subdirectory
-    """
     return make_plot_path(fig_dir, base_name, suffix, format, group_dir=group)

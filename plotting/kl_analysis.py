@@ -5,18 +5,89 @@ import numpy as np
 
 from .core import make_grouped_plot_path, save_figure
 
+# Styling constants
+STANDARD_FIGURE_SIZE = (12, 8)
+HEATMAP_FIGURE_SIZE = (14, 8)
+GRID_ALPHA = 0.3
+DEFAULT_ALPHA = 0.8
+LINE_ALPHA = 0.7
+FILL_ALPHA = 0.3
+
+# Plot styling
+LINE_WIDTH = 2
+LINE_WIDTH_THIN = 1.5
+MARKER_SIZE = 4
+MARKER_SIZE_SMALL = 3
+EDGE_LINE_WIDTH = 0.5
+BAR_LABEL_FONTSIZE = 8
+
+# Histogram settings
+HISTOGRAM_BINS = 15
+MAX_DIMS_FOR_LABELS = 20
+
+# Tick settings
+MAX_EPOCHS_FULL_TICKS = 15
+HEATMAP_TICK_DIVISIONS = 8
+
+# Color scheme
+COLOR_ACTIVE = "steelblue"
+COLOR_INACTIVE = "red"
+COLOR_THRESHOLD = "red"
+COLOR_GRAY = "gray"
+COLOR_PURPLE = "purple"
+COLOR_EARLY = "lightblue"
+COLOR_MIDDLE = "orange"
+COLOR_FINAL = "red"
+
+
+def _validate_kl_history(test_history: dict) -> bool:
+    """Validate that test history contains required KL data.
+
+    Args:
+        test_history: History dictionary to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not test_history.get("kl_per_dim"):
+        print("Skipping KL diagnostics: Missing 'kl_per_dim' in test history")
+        return False
+    if not test_history.get("epoch"):
+        print("Skipping KL diagnostics: Missing 'epoch' in test history")
+        return False
+    return True
+
+
+def _configure_common_axis(
+    ax,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    add_grid: bool = True,
+    add_legend: bool = True,
+) -> None:
+    """Apply common axis configuration."""
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if add_grid:
+        ax.grid(True, alpha=GRID_ALPHA)
+    if add_legend:
+        ax.legend()
+
 
 def save_kl_diagnostics_separate(
     test_history: dict, fig_dir: str, active_threshold: float = 0.1
-):
+) -> None:
     """Save separate KL per dimension diagnostic plots."""
-    if not test_history.get("kl_per_dim") or not test_history.get("epoch"):
+    if not _validate_kl_history(test_history):
         return
 
     epochs = np.asarray(test_history["epoch"], dtype=float)
     kl_per_dim_history = test_history["kl_per_dim"]
 
     if len(epochs) == 0 or not kl_per_dim_history:
+        print("Skipping KL diagnostics: Empty epoch or KL data")
         return
 
     # Prepare data
@@ -32,228 +103,241 @@ def save_kl_diagnostics_separate(
     )
 
     # Create separate plots
+    fig, ax = plt.subplots(figsize=STANDARD_FIGURE_SIZE)
+    _plot_kl_bar_chart(ax, latest_kl_per_dim, active_threshold, latent_dim)
+    save_figure(make_grouped_plot_path(fig_dir, "kl_analysis", "per_dimension", "bar"))
+    plt.close()
 
-    # 1. KL bar chart
-    fig, ax = plt.subplots(figsize=(12, 8))
-    _plot_kl_bar_chart_standalone(ax, kl_matrix, latest_kl_per_dim, active_threshold)
+    fig, ax = plt.subplots(figsize=STANDARD_FIGURE_SIZE)
+    _plot_active_units_over_time(ax, epochs, active_units_over_time, latent_dim)
     save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_per_dimension", "bar")
+        make_grouped_plot_path(fig_dir, "kl_analysis", "active_units", "over_time")
     )
     plt.close()
 
-    # 2. Active units over time
-    fig, ax = plt.subplots(figsize=(12, 8))
-    _plot_active_units_over_time_standalone(
-        ax, epochs, active_units_over_time, latent_dim
-    )
+    fig, ax = plt.subplots(figsize=HEATMAP_FIGURE_SIZE)
+    _plot_kl_heatmap(ax, epochs, kl_matrix, latent_dim)
+    save_figure(make_grouped_plot_path(fig_dir, "kl_analysis", "evolution", "heatmap"))
+    plt.close()
+
+    fig, ax = plt.subplots(figsize=STANDARD_FIGURE_SIZE)
+    _plot_kl_statistics_over_time(ax, epochs, kl_matrix)
     save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_active_units", "over_time")
+        make_grouped_plot_path(fig_dir, "kl_analysis", "statistics", "over_time")
     )
     plt.close()
 
-    # 3. KL heatmap
-    fig, ax = plt.subplots(figsize=(14, 8))
-    _plot_kl_heatmap_standalone(ax, epochs, kl_matrix, latent_dim)
+    fig, ax = plt.subplots(figsize=STANDARD_FIGURE_SIZE)
+    _plot_kl_distribution_histogram(ax, epochs, kl_matrix, active_threshold)
     save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_evolution", "heatmap")
+        make_grouped_plot_path(fig_dir, "kl_analysis", "distribution", "histogram")
     )
     plt.close()
 
-    # 4. KL statistics over time
-    fig, ax = plt.subplots(figsize=(12, 8))
-    _plot_kl_statistics_over_time_standalone(ax, epochs, kl_matrix)
+    fig, ax = plt.subplots(figsize=STANDARD_FIGURE_SIZE)
+    _plot_cumulative_kl_contribution(ax, latest_kl_per_dim, latent_dim)
     save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_statistics", "over_time")
-    )
-    plt.close()
-
-    # 5. KL distribution histogram
-    fig, ax = plt.subplots(figsize=(12, 8))
-    _plot_kl_distribution_histogram_standalone(ax, epochs, kl_matrix, active_threshold)
-    save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_distribution", "histogram")
-    )
-    plt.close()
-
-    # 6. Cumulative KL contribution
-    fig, ax = plt.subplots(figsize=(12, 8))
-    _plot_cumulative_kl_contribution_standalone(ax, latest_kl_per_dim, latent_dim)
-    save_figure(
-        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_cumulative", "contribution")
+        make_grouped_plot_path(fig_dir, "kl_analysis", "cumulative", "contribution")
     )
     plt.close()
 
 
-def _plot_kl_bar_chart_standalone(ax, kl_matrix, latest_kl_per_dim, active_threshold):
-    """Plot KL per dimension bar chart as standalone plot."""
-    latent_dim = kl_matrix.shape[1]
+def _plot_kl_bar_chart(
+    ax, latest_kl_per_dim: np.ndarray, active_threshold: float, latent_dim: int
+) -> None:
+    """Plot KL per dimension bar chart."""
     dims = np.arange(latent_dim)
     colors = [
-        "red" if kl < active_threshold else "steelblue" for kl in latest_kl_per_dim
+        COLOR_INACTIVE if kl < active_threshold else COLOR_ACTIVE
+        for kl in latest_kl_per_dim
     ]
     bars = ax.bar(
         dims,
         latest_kl_per_dim,
         color=colors,
-        alpha=0.8,
+        alpha=DEFAULT_ALPHA,
         edgecolor="black",
-        linewidth=0.5,
+        linewidth=EDGE_LINE_WIDTH,
     )
     ax.axhline(
         y=active_threshold,
-        color="red",
+        color=COLOR_THRESHOLD,
         linestyle="--",
-        alpha=0.7,
+        alpha=LINE_ALPHA,
         label=f"Threshold = {active_threshold}",
     )
-    ax.set_xlabel("Latent Dimension")
-    ax.set_ylabel("KL Divergence")
-    ax.set_title("Final KL per Dimension")
     ax.set_xticks(dims)
     ax.set_xticklabels([f"z{i + 1}" for i in dims])
-    ax.grid(True, alpha=0.3, axis="y")
-    ax.legend()
 
     # Add value labels on bars if not too many dimensions
-    if latent_dim <= 20:
+    if latent_dim <= MAX_DIMS_FOR_LABELS:
+        max_kl = max(latest_kl_per_dim)
         for bar, val in zip(bars, latest_kl_per_dim):
             height = bar.get_height()
             ax.text(
                 bar.get_x() + bar.get_width() / 2.0,
-                height + max(latest_kl_per_dim) * 0.01,
+                height + max_kl * 0.01,
                 f"{val:.2f}",
                 ha="center",
                 va="bottom",
-                fontsize=8,
+                fontsize=BAR_LABEL_FONTSIZE,
             )
 
+    _configure_common_axis(
+        ax, "Final KL per Dimension", "Latent Dimension", "KL Divergence"
+    )
 
-def _plot_active_units_over_time_standalone(
-    ax, epochs, active_units_over_time, latent_dim
-):
-    """Plot active units over time as standalone plot."""
+
+def _plot_active_units_over_time(
+    ax, epochs: np.ndarray, active_units_over_time: np.ndarray, latent_dim: int
+) -> None:
+    """Plot active units over time."""
     ax.plot(
         epochs,
         active_units_over_time,
         "o-",
-        color="steelblue",
-        linewidth=2,
-        markersize=4,
+        color=COLOR_ACTIVE,
+        linewidth=LINE_WIDTH,
+        markersize=MARKER_SIZE,
         label="Active Units",
     )
     ax.axhline(
         y=latent_dim,
-        color="gray",
+        color=COLOR_GRAY,
         linestyle="--",
-        alpha=0.5,
+        alpha=FILL_ALPHA,
         label=f"Max ({latent_dim})",
     )
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Active Units")
-    ax.set_title("Active Units Over Time")
     ax.set_ylim((0, latent_dim + 0.5))
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+    _configure_common_axis(ax, "Active Units Over Time", "Epoch", "Active Units")
 
 
-def _plot_kl_heatmap_standalone(ax, epochs, kl_matrix, latent_dim):
-    """Plot KL evolution heatmap as standalone plot."""
-    im = ax.imshow(kl_matrix.T, aspect="auto", cmap="viridis", origin="lower")
-
-    # Set ticks for heatmap
-    if len(epochs) <= 15:
+def _set_heatmap_epoch_ticks(ax, epochs: np.ndarray) -> None:
+    """Configure x-axis ticks for heatmap based on number of epochs."""
+    if len(epochs) <= MAX_EPOCHS_FULL_TICKS:
         ax.set_xticks(range(len(epochs)))
         ax.set_xticklabels([f"{int(e)}" for e in epochs])
     else:
-        step = max(1, len(epochs) // 8)
+        step = max(1, len(epochs) // HEATMAP_TICK_DIVISIONS)
         tick_indices = range(0, len(epochs), step)
         ax.set_xticks(tick_indices)
         ax.set_xticklabels([f"{int(epochs[i])}" for i in tick_indices])
 
+
+def _plot_kl_heatmap(
+    ax, epochs: np.ndarray, kl_matrix: np.ndarray, latent_dim: int
+) -> None:
+    """Plot KL evolution heatmap."""
+    im = ax.imshow(kl_matrix.T, aspect="auto", cmap="viridis", origin="lower")
+
+    _set_heatmap_epoch_ticks(ax, epochs)
     ax.set_yticks(range(latent_dim))
     ax.set_yticklabels([f"z{i + 1}" for i in range(latent_dim)])
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Latent Dimension")
-    ax.set_title("KL Evolution Heatmap")
 
-    # Add colorbar for heatmap
+    _configure_common_axis(
+        ax,
+        "KL Evolution Heatmap",
+        "Epoch",
+        "Latent Dimension",
+        add_grid=False,
+        add_legend=False,
+    )
+
+    # Add colorbar
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("KL Divergence")
 
 
-def _plot_kl_statistics_over_time_standalone(ax, epochs, kl_matrix):
-    """Plot KL statistics over time as standalone plot."""
+def _plot_kl_statistics_over_time(
+    ax, epochs: np.ndarray, kl_matrix: np.ndarray
+) -> None:
+    """Plot KL statistics over time."""
     mean_kl = np.mean(kl_matrix, axis=1)
     std_kl = np.std(kl_matrix, axis=1)
     max_kl = np.max(kl_matrix, axis=1)
     min_kl = np.min(kl_matrix, axis=1)
 
-    ax.plot(epochs, mean_kl, "o-", label="Mean KL", linewidth=2, markersize=3)
+    ax.plot(
+        epochs,
+        mean_kl,
+        "o-",
+        label="Mean KL",
+        linewidth=LINE_WIDTH,
+        markersize=MARKER_SIZE_SMALL,
+    )
     ax.fill_between(
-        epochs, mean_kl - std_kl, mean_kl + std_kl, alpha=0.3, label="±1 std"
+        epochs, mean_kl - std_kl, mean_kl + std_kl, alpha=FILL_ALPHA, label="±1 std"
     )
     ax.plot(
-        epochs, max_kl, "s-", label="Max KL", alpha=0.7, linewidth=1.5, markersize=3
+        epochs,
+        max_kl,
+        "s-",
+        label="Max KL",
+        alpha=LINE_ALPHA,
+        linewidth=LINE_WIDTH_THIN,
+        markersize=MARKER_SIZE_SMALL,
     )
     ax.plot(
-        epochs, min_kl, "^-", label="Min KL", alpha=0.7, linewidth=1.5, markersize=3
+        epochs,
+        min_kl,
+        "^-",
+        label="Min KL",
+        alpha=LINE_ALPHA,
+        linewidth=LINE_WIDTH_THIN,
+        markersize=MARKER_SIZE_SMALL,
     )
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("KL Divergence")
-    ax.set_title("KL Statistics Over Time")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+
+    _configure_common_axis(ax, "KL Statistics Over Time", "Epoch", "KL Divergence")
 
 
-def _plot_kl_distribution_histogram_standalone(ax, epochs, kl_matrix, active_threshold):
-    """Plot KL distribution histogram as standalone plot."""
-    # Plot histogram for a few key epochs
+def _plot_kl_distribution_histogram(
+    ax, epochs: np.ndarray, kl_matrix: np.ndarray, active_threshold: float
+) -> None:
+    """Plot KL distribution histogram."""
     n_epochs = len(epochs)
     if n_epochs >= 3:
         epoch_indices = [0, n_epochs // 2, -1]
         epoch_labels = ["Early", "Middle", "Final"]
-        colors_hist = ["lightblue", "orange", "red"]
+        colors = [COLOR_EARLY, COLOR_MIDDLE, COLOR_FINAL]
 
-        for idx, label, color in zip(epoch_indices, epoch_labels, colors_hist):
+        for idx, label, color in zip(epoch_indices, epoch_labels, colors):
             ax.hist(
                 kl_matrix[idx],
-                bins=15,
+                bins=HISTOGRAM_BINS,
                 alpha=0.6,
                 label=f"{label} (E{int(epochs[idx])})",
                 color=color,
                 edgecolor="black",
-                linewidth=0.5,
+                linewidth=EDGE_LINE_WIDTH,
             )
     else:
         ax.hist(
             kl_matrix[-1],
-            bins=15,
-            alpha=0.7,
+            bins=HISTOGRAM_BINS,
+            alpha=LINE_ALPHA,
             label=f"Final (E{int(epochs[-1])})",
-            color="red",
+            color=COLOR_FINAL,
             edgecolor="black",
-            linewidth=0.5,
+            linewidth=EDGE_LINE_WIDTH,
         )
 
     ax.axvline(
         x=active_threshold,
-        color="red",
+        color=COLOR_THRESHOLD,
         linestyle="--",
-        alpha=0.8,
+        alpha=DEFAULT_ALPHA,
         label=f"Threshold = {active_threshold}",
     )
-    ax.set_xlabel("KL Divergence")
-    ax.set_ylabel("Count")
-    ax.set_title("Distribution of KL Values")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+
+    _configure_common_axis(ax, "Distribution of KL Values", "KL Divergence", "Count")
 
 
-def _plot_cumulative_kl_contribution_standalone(ax, latest_kl_per_dim, latent_dim):
-    """Plot cumulative KL contribution as standalone plot."""
+def _plot_cumulative_kl_contribution(
+    ax, latest_kl_per_dim: np.ndarray, latent_dim: int
+) -> None:
+    """Plot cumulative KL contribution."""
     # Sort dimensions by final KL value and compute cumulative contribution
-    final_kl_sorted_idx = np.argsort(latest_kl_per_dim)[::-1]  # Descending order
-    final_kl_sorted = latest_kl_per_dim[final_kl_sorted_idx]
+    final_kl_sorted = np.sort(latest_kl_per_dim)[::-1]  # Descending order
     cumsum_kl = np.cumsum(final_kl_sorted)
     total_kl = np.sum(latest_kl_per_dim)
     cumsum_percentage = 100.0 * cumsum_kl / total_kl
@@ -262,16 +346,26 @@ def _plot_cumulative_kl_contribution_standalone(ax, latest_kl_per_dim, latent_di
         range(1, latent_dim + 1),
         cumsum_percentage,
         "o-",
-        color="purple",
-        linewidth=2,
-        markersize=4,
+        color=COLOR_PURPLE,
+        linewidth=LINE_WIDTH,
+        markersize=MARKER_SIZE,
     )
-    ax.axhline(y=90, color="gray", linestyle="--", alpha=0.7, label="90% of total KL")
-    ax.axhline(y=95, color="gray", linestyle=":", alpha=0.7, label="95% of total KL")
-    ax.set_xlabel("Number of Top Dimensions")
-    ax.set_ylabel("Cumulative KL (%)")
-    ax.set_title("Cumulative KL Contribution")
+    ax.axhline(
+        y=90,
+        color=COLOR_GRAY,
+        linestyle="--",
+        alpha=LINE_ALPHA,
+        label="90% of total KL",
+    )
+    ax.axhline(
+        y=95, color=COLOR_GRAY, linestyle=":", alpha=LINE_ALPHA, label="95% of total KL"
+    )
     ax.set_xticks(range(1, latent_dim + 1))
-    ax.grid(True, alpha=0.3)
-    ax.legend()
     ax.set_ylim((0, 105))
+
+    _configure_common_axis(
+        ax,
+        "Cumulative KL Contribution",
+        "Number of Top Dimensions",
+        "Cumulative KL (%)",
+    )

@@ -579,7 +579,6 @@ class VAETrainer:
             self.device,
             self.model.config.latent_dim,
             make_grouped_plot_path(self.fig_dir, "generation", "samples"),
-            n=self.config.n_samples,
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
 
