@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
-from .core import DEFAULT_DPI
+from .core import make_plot_path, save_figure
 
 
 def save_training_curves(
@@ -69,8 +69,7 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_yscale("log")  # Use log scale for better visualization
-        plt.tight_layout()
-        plt.savefig(f"{fig_dir}/learning_rate_epochs.webp", dpi=DEFAULT_DPI)
+        save_figure(make_plot_path(fig_dir, "learning_rate", "epochs"))
         plt.close()
 
     # 2. ELBO plot
@@ -92,8 +91,7 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     ax.set_title("ELBO (Higher is Better)")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/elbo_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "elbo", "epochs"))
     plt.close()
 
     # 3. Reconstruction loss plot
@@ -110,8 +108,7 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     ax.set_title("Reconstruction Loss")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/reconstruction_loss_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "reconstruction_loss", "epochs"))
     plt.close()
 
     # 4. KL divergence plot
@@ -126,16 +123,14 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     ax.set_title("KL Divergence")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_loss_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_loss", "epochs"))
     plt.close()
 
     # 5. Loss scatter plot (BCE vs KL from test data colored by epoch)
     if len(test_epochs) > 0:
         fig, ax = plt.subplots(figsize=(10, 8))
         _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr)
-        plt.tight_layout()
-        plt.savefig(f"{fig_dir}/loss_scatter_epochs.webp", dpi=DEFAULT_DPI)
+        save_figure(make_plot_path(fig_dir, "loss_scatter", "epochs"))
         plt.close()
 
 
@@ -161,8 +156,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
         ax.set_title("Learning Rate Schedule by Training Step")
         ax.grid(True, alpha=0.3)
         ax.set_yscale("log")  # Use log scale for better visualization
-        plt.tight_layout()
-        plt.savefig(f"{fig_dir}/learning_rate_steps.webp", dpi=DEFAULT_DPI)
+        save_figure(make_plot_path(fig_dir, "learning_rate", "steps"))
         plt.close()
 
     # 2. ELBO step plot
@@ -172,8 +166,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("ELBO")
     ax.set_title("ELBO by Training Step (Higher is Better)")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/elbo_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "elbo", "steps"))
     plt.close()
 
     # 3. Reconstruction loss step plot
@@ -185,8 +178,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("BCE Loss")
     ax.set_title("Reconstruction Loss by Training Step")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/reconstruction_loss_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "reconstruction_loss", "steps"))
     plt.close()
 
     # 4. KL step plot
@@ -196,8 +188,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("KL Loss")
     ax.set_title("KL Divergence by Training Step")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_loss_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_loss", "steps"))
     plt.close()
 
     # 5. Combined step plot for comparison
@@ -212,8 +203,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_title("All Losses by Training Step")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/all_losses_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "all_losses", "steps"))
     plt.close()
 
 

@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import DEFAULT_DPI
+from .core import make_plot_path, save_figure
 
 
 def save_kl_diagnostics_separate(
@@ -36,8 +36,7 @@ def save_kl_diagnostics_separate(
     # 1. KL bar chart
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_bar_chart_standalone(ax, kl_matrix, latest_kl_per_dim, active_threshold)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_per_dimension_bar.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_per_dimension", "bar"))
     plt.close()
 
     # 2. Active units over time
@@ -45,36 +44,31 @@ def save_kl_diagnostics_separate(
     _plot_active_units_over_time_standalone(
         ax, epochs, active_units_over_time, latent_dim
     )
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_active_units_over_time.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_active_units", "over_time"))
     plt.close()
 
     # 3. KL heatmap
     fig, ax = plt.subplots(figsize=(14, 8))
     _plot_kl_heatmap_standalone(ax, epochs, kl_matrix, latent_dim)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_evolution_heatmap.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_evolution", "heatmap"))
     plt.close()
 
     # 4. KL statistics over time
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_statistics_over_time_standalone(ax, epochs, kl_matrix)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_statistics_over_time.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_statistics", "over_time"))
     plt.close()
 
     # 5. KL distribution histogram
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_distribution_histogram_standalone(ax, epochs, kl_matrix, active_threshold)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_distribution_histogram.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_distribution", "histogram"))
     plt.close()
 
     # 6. Cumulative KL contribution
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_cumulative_kl_contribution_standalone(ax, latest_kl_per_dim, latent_dim)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/kl_cumulative_contribution.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "kl_cumulative", "contribution"))
     plt.close()
 
 

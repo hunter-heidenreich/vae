@@ -2,7 +2,8 @@
 # Expose commonly used functions at package level for easy importing
 
 from .core import (decode_samples, figure_context, grid_from_images,
-                   model_inference)
+                   make_plot_path, model_inference, save_figure,
+                   split_plot_path, subplot_context)
 from .data import (apply_pca_if_needed, collect_all_latent_data,
                    collect_latents, collect_latents_with_std,
                    compute_kl_per_dimension, get_colormap_colors)
@@ -20,6 +21,10 @@ __all__ = [
     # Core utilities
     "model_inference",
     "figure_context",
+    "subplot_context",
+    "save_figure",
+    "make_plot_path",
+    "split_plot_path",
     "decode_samples",
     "grid_from_images",
     # Data processing

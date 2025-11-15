@@ -1,6 +1,5 @@
 """Image generation and sampling plots."""
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Sized, cast
 
 import matplotlib.pyplot as plt
@@ -8,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .core import (decode_samples, figure_context, grid_from_images,
-                   model_inference)
+                   model_inference, save_figure, split_plot_path)
 
 if TYPE_CHECKING:
     from model import VAE
@@ -127,8 +126,7 @@ def save_latent_sweep_figure(
         ax.axis("off")
         ax.set_title(f"Latent Space Sweep ({label})", fontsize=10, pad=5)
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
+    save_figure(out_path)
     plt.close()
 
 
@@ -142,12 +140,10 @@ def save_interpolation_and_sweep_figures(
     sweep_steps: int = 15,
 ):
     """Create separate interpolation and latent sweep figures."""
-    base_path = Path(out_path).stem
-
-    interp_path = f"{base_path}_interpolation.webp"
+    interp_path = split_plot_path(out_path, "interpolation")
     save_interpolation_figure(model, loader, device, interp_path, steps, method)
 
-    sweep_path = f"{base_path}_latent_sweep.webp"
+    sweep_path = split_plot_path(out_path, "latent_sweep")
     save_latent_sweep_figure(model, device, sweep_path, sweep_steps)
 
 

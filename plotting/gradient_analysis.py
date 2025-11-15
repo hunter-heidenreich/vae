@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import DEFAULT_DPI
+from .core import make_plot_path, save_figure
 
 
 def save_gradient_diagnostics(
@@ -52,29 +52,25 @@ def _save_epoch_gradient_diagnostics(train_history: dict, fig_dir: str):
     # 1. Gradient Norms
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_gradient_norms(ax, epochs, recon_norm, kl_norm, realized_norm, unclipped_norm)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_norms_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_norms", "epochs"))
     plt.close()
 
     # 2. Gradient Alignment
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_gradient_alignment(ax, epochs, recon_kl_cosine)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_alignment_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_alignment", "epochs"))
     plt.close()
 
     # 3. Gradient Contributions
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_gradient_contributions(ax, epochs, recon_contrib, kl_contrib)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_contributions_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_contributions", "epochs"))
     plt.close()
 
     # 4. Effective Magnitudes
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_effective_magnitudes(ax, epochs, realized_norm, recon_contrib, kl_contrib)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_effective_magnitudes_epochs.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_effective_magnitudes", "epochs"))
     plt.close()
 
 
@@ -113,22 +109,19 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
     _plot_gradient_norms_steps(
         ax, steps, recon_norm, kl_norm, realized_norm, unclipped_norm
     )
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_norms_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_norms", "steps"))
     plt.close()
 
     # 2. Step Gradient Alignment
     fig, ax = plt.subplots(figsize=(14, 8))
     _plot_gradient_alignment_steps(ax, steps, recon_kl_cosine)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_alignment_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_alignment", "steps"))
     plt.close()
 
     # 3. Step Gradient Contributions
     fig, ax = plt.subplots(figsize=(14, 8))
     _plot_gradient_contributions_steps(ax, steps, recon_contrib, kl_contrib)
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_contributions_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_contributions", "steps"))
     plt.close()
 
     # 4. Step Effective Magnitudes
@@ -136,8 +129,7 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
     _plot_effective_magnitudes_steps(
         ax, steps, realized_norm, recon_contrib, kl_contrib
     )
-    plt.tight_layout()
-    plt.savefig(f"{fig_dir}/gradient_effective_magnitudes_steps.webp", dpi=DEFAULT_DPI)
+    save_figure(make_plot_path(fig_dir, "gradient_effective_magnitudes", "steps"))
     plt.close()
 
 

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from .core import DEFAULT_ALPHA, DEFAULT_CMAP, DEFAULT_DPI, figure_context
+from .core import DEFAULT_ALPHA, DEFAULT_CMAP, figure_context, save_figure
 from .data import apply_pca_if_needed, get_colormap_colors
 
 
@@ -67,8 +67,7 @@ def save_latent_combined_figure(Z: np.ndarray, Y: np.ndarray, out_path: str):
             plt.ylabel("z2")
             plt.title("Latent 2D histogram")
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=DEFAULT_DPI)
+    save_figure(out_path)
     plt.close()
 
 
@@ -153,8 +152,7 @@ def save_logvar_combined_figure(LogVar: np.ndarray, Y: np.ndarray, out_path: str
             plt.ylabel("logvar2")
             plt.title("Log Variance 2D histogram")
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=DEFAULT_DPI)
+    save_figure(out_path)
     plt.close()
 
 

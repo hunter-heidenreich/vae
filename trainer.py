@@ -15,7 +15,7 @@ from tqdm import tqdm
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
 from plotting import (collect_all_latent_data, compute_kl_per_dimension,
-                      save_gradient_diagnostics,
+                      make_plot_path, save_gradient_diagnostics,
                       save_interpolation_and_sweep_figures,
                       save_kl_diagnostics_separate,
                       save_latent_combined_figure, save_latent_marginals,
@@ -439,7 +439,7 @@ class VAETrainer:
             self.model,
             first_batch,
             self.device,
-            os.path.join(self.fig_dir, "reconstructions.webp"),
+            make_plot_path(self.fig_dir, "reconstructions"),
             n=self.config.n_recon,
         )
 
@@ -448,7 +448,7 @@ class VAETrainer:
             self.model,
             self.device,
             self.model.config.latent_dim,
-            os.path.join(self.fig_dir, "samples.webp"),
+            make_plot_path(self.fig_dir, "samples"),
             n=self.config.n_samples,
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
@@ -458,7 +458,7 @@ class VAETrainer:
             self.model,
             test_loader,
             self.device,
-            os.path.join(self.fig_dir, "interpolation.webp"),
+            make_plot_path(self.fig_dir, "generation"),
             steps=self.config.interp_steps,
             method=self.config.interp_method,
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
@@ -475,17 +475,19 @@ class VAETrainer:
 
         # Mean (mu) plots - using Z (sampled latents) for visualization
         save_latent_combined_figure(
-            Z, Y, os.path.join(self.fig_dir, "mnist-2d-combined.webp")
+            Z, Y, make_plot_path(self.fig_dir, "latent_space", "combined")
         )
-        save_latent_marginals(Z, os.path.join(self.fig_dir, "mnist-1d-hists.webp"))
+        save_latent_marginals(
+            Z, make_plot_path(self.fig_dir, "latent_space", "marginals")
+        )
 
         # Log variance (sigma/logvar) plots - convert std to logvar
         LogVar = np.log(Std**2)  # Convert std to log variance
         save_logvar_combined_figure(
-            LogVar, Y, os.path.join(self.fig_dir, "mnist-logvar-2d-combined.webp")
+            LogVar, Y, make_plot_path(self.fig_dir, "latent_logvar", "combined")
         )
         save_logvar_marginals(
-            LogVar, os.path.join(self.fig_dir, "mnist-logvar-1d-hists.webp")
+            LogVar, make_plot_path(self.fig_dir, "latent_logvar", "marginals")
         )
 
         # Training curves
