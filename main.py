@@ -12,7 +12,6 @@ from trainer_config import TrainerConfig
 
 
 def get_dataloaders(batch_size: int):
-    """Create MNIST data loaders."""
     transform = T.ToTensor()
 
     train_data = datasets.MNIST(
@@ -34,7 +33,6 @@ def get_dataloaders(batch_size: int):
 
 
 def parse_args():
-    """Parse command-line arguments and create TrainerConfig."""
     parser = argparse.ArgumentParser(
         description="Train a Variational Autoencoder on MNIST"
     )
@@ -205,10 +203,8 @@ def parse_args():
 
 
 def main():
-    """Main training function using VAETrainer."""
     args = parse_args()
 
-    # Create trainer configuration
     trainer_config = TrainerConfig(
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
@@ -230,7 +226,6 @@ def main():
         seed=args.seed,
     )
 
-    # Create model configuration
     model_config = VAEConfig(
         input_shape=args.input_shape,
         hidden_dim=args.hidden_dim,
@@ -241,24 +236,18 @@ def main():
         n_samples=args.n_latent_samples,
     )
 
-    # Create model
     model = VAE(model_config)
     print(model)
 
-    # Create data loaders
     train_loader, test_loader = get_dataloaders(batch_size=trainer_config.batch_size)
 
-    # Create and run trainer
     trainer = VAETrainer(model=model, config=trainer_config)
-
-    # Save CLI arguments and configurations for tracking
     args_dict = vars(args)
     args_file = os.path.join(trainer.run_dir, "cli_args.json")
     with open(args_file, "w") as f:
         json.dump(args_dict, f, indent=2, default=str)
     print(f"CLI arguments saved to: {args_file}")
 
-    # Save full configuration (trainer + model configs)
     config_dict = {
         "trainer_config": trainer_config.__dict__,
         "model_config": model_config.__dict__,
@@ -270,20 +259,16 @@ def main():
     print(f"Full configuration saved to: {config_file}")
 
     try:
-        # Run complete training
         trainer.train(train_loader, test_loader)
 
-        # Save performance metrics
         performance_file = os.path.join(trainer.run_dir, "performance.json")
         trainer.save_performance_metrics(performance_file)
         print(f"Performance metrics saved to: {performance_file}")
 
-        # Generate analysis plots using complete training history
-        # (This uses current history for plotting, then loads best model only for generation)
+        # Uses current history for plotting, then loads best model only for generation
         trainer.generate_analysis_plots(test_loader)
 
     finally:
-        # Clean up
         trainer.close()
 
     print("Training and analysis completed successfully!")
