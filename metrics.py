@@ -12,15 +12,22 @@ class MetricsAccumulator:
     Handles both scalar metrics (that get averaged) and list metrics (that get appended).
     """
 
-    def __init__(self, enable_gradient_analysis: bool = False):
+    def __init__(
+        self,
+        enable_gradient_analysis: bool = False,
+        enable_latent_tracking: bool = False,
+    ):
         """
         Initialize the metrics accumulator.
 
         Args:
             enable_gradient_analysis: Whether to track gradient analysis metrics
+            enable_latent_tracking: Whether to track latent dimension statistics
         """
         self.enable_gradient_analysis = enable_gradient_analysis
+        self.enable_latent_tracking = enable_latent_tracking
         self.metrics: Dict[str, List[float]] = {}
+        self.latent_stats: Dict[str, List[List[float]]] = {}  # For per-dimension stats
         self.count = 0
 
         # Define base metrics that are always tracked
@@ -55,6 +62,15 @@ class MetricsAccumulator:
             for metric in self.gradient_metrics:
                 self.metrics[metric] = []
 
+        # Initialize latent tracking if enabled
+        if self.enable_latent_tracking:
+            self.latent_stats = {
+                "mu_means": [],  # Mean of mu for each dimension
+                "mu_stds": [],  # Std of mu for each dimension
+                "std_means": [],  # Mean of std for each dimension
+                "std_stds": [],  # Std of std for each dimension
+            }
+
     def add_step(self, step_metrics: Dict[str, float]):
         """
         Add metrics from a single training/validation step.
@@ -67,6 +83,30 @@ class MetricsAccumulator:
                 self.metrics[metric_name].append(value)
 
         self.count += 1
+
+    def add_latent_stats(
+        self,
+        mu_batch: List[float],
+        mu_std_batch: List[float],
+        sigma_batch: List[float],
+        sigma_std_batch: List[float],
+    ):
+        """
+        Add latent dimension statistics from a batch.
+
+        Args:
+            mu_batch: Per-dimension means of mu for this batch [dim1_mu_mean, dim2_mu_mean, ...]
+            mu_std_batch: Per-dimension stds of mu for this batch [dim1_mu_std, dim2_mu_std, ...]
+            sigma_batch: Per-dimension means of sigma for this batch [dim1_sigma_mean, dim2_sigma_mean, ...]
+            sigma_std_batch: Per-dimension stds of sigma for this batch [dim1_sigma_std, dim2_sigma_std, ...]
+        """
+        if not self.enable_latent_tracking:
+            return
+
+        self.latent_stats["mu_means"].append(mu_batch)
+        self.latent_stats["mu_stds"].append(mu_std_batch)
+        self.latent_stats["std_means"].append(sigma_batch)
+        self.latent_stats["std_stds"].append(sigma_std_batch)
 
     def get_averages(self) -> Dict[str, float]:
         """
@@ -84,6 +124,54 @@ class MetricsAccumulator:
                 averages[metric_name] = sum(values) / len(values)
 
         return averages
+
+    def get_latent_statistics(self) -> Dict[str, List[float]]:
+        """
+        Compute averaged latent statistics across all batches.
+
+        Returns:
+            Dictionary with per-dimension averaged statistics for both mu and sigma
+        """
+        if not self.enable_latent_tracking or not self.latent_stats["mu_means"]:
+            return {}
+
+        import numpy as np
+
+        # Convert lists of per-dimension stats to numpy arrays for easier computation
+        mu_means_array = np.array(
+            self.latent_stats["mu_means"]
+        )  # Shape: (n_batches, n_dims)
+        mu_stds_array = np.array(
+            self.latent_stats["mu_stds"]
+        )  # Shape: (n_batches, n_dims)
+        sigma_means_array = np.array(
+            self.latent_stats["std_means"]
+        )  # Shape: (n_batches, n_dims)
+        sigma_stds_array = np.array(
+            self.latent_stats["std_stds"]
+        )  # Shape: (n_batches, n_dims)
+
+        # Compute statistics across batches for each dimension
+        return {
+            # Statistics about mu (mean parameter)
+            "mu_mean_per_dim": np.mean(
+                mu_means_array, axis=0
+            ).tolist(),  # Average of mu means per dim
+            "mu_std_per_dim": np.mean(
+                mu_stds_array, axis=0
+            ).tolist(),  # Average of mu stds per dim
+            "mu_mean_overall": np.mean(mu_means_array),  # Overall mu mean
+            "mu_std_overall": np.mean(mu_stds_array),  # Overall mu std
+            # Statistics about sigma (std parameter)
+            "sigma_mean_per_dim": np.mean(
+                sigma_means_array, axis=0
+            ).tolist(),  # Average of sigma means per dim
+            "sigma_std_per_dim": np.mean(
+                sigma_stds_array, axis=0
+            ).tolist(),  # Average of sigma stds per dim
+            "sigma_mean_overall": np.mean(sigma_means_array),  # Overall sigma mean
+            "sigma_std_overall": np.mean(sigma_stds_array),  # Overall sigma std
+        }
 
     def get_latest(self) -> Dict[str, float]:
         """
@@ -103,6 +191,11 @@ class MetricsAccumulator:
         """Reset all accumulated metrics."""
         for metric_name in self.metrics:
             self.metrics[metric_name].clear()
+
+        if self.enable_latent_tracking:
+            for stat_name in self.latent_stats:
+                self.latent_stats[stat_name].clear()
+
         self.count = 0
 
     def get_count(self) -> int:

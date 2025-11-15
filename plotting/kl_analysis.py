@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import make_plot_path, save_figure
+from .core import make_grouped_plot_path, save_figure
 
 
 def save_kl_diagnostics_separate(
@@ -36,7 +36,9 @@ def save_kl_diagnostics_separate(
     # 1. KL bar chart
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_bar_chart_standalone(ax, kl_matrix, latest_kl_per_dim, active_threshold)
-    save_figure(make_plot_path(fig_dir, "kl_per_dimension", "bar"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_per_dimension", "bar")
+    )
     plt.close()
 
     # 2. Active units over time
@@ -44,31 +46,41 @@ def save_kl_diagnostics_separate(
     _plot_active_units_over_time_standalone(
         ax, epochs, active_units_over_time, latent_dim
     )
-    save_figure(make_plot_path(fig_dir, "kl_active_units", "over_time"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_active_units", "over_time")
+    )
     plt.close()
 
     # 3. KL heatmap
     fig, ax = plt.subplots(figsize=(14, 8))
     _plot_kl_heatmap_standalone(ax, epochs, kl_matrix, latent_dim)
-    save_figure(make_plot_path(fig_dir, "kl_evolution", "heatmap"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_evolution", "heatmap")
+    )
     plt.close()
 
     # 4. KL statistics over time
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_statistics_over_time_standalone(ax, epochs, kl_matrix)
-    save_figure(make_plot_path(fig_dir, "kl_statistics", "over_time"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_statistics", "over_time")
+    )
     plt.close()
 
     # 5. KL distribution histogram
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_kl_distribution_histogram_standalone(ax, epochs, kl_matrix, active_threshold)
-    save_figure(make_plot_path(fig_dir, "kl_distribution", "histogram"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_distribution", "histogram")
+    )
     plt.close()
 
     # 6. Cumulative KL contribution
     fig, ax = plt.subplots(figsize=(12, 8))
     _plot_cumulative_kl_contribution_standalone(ax, latest_kl_per_dim, latent_dim)
-    save_figure(make_plot_path(fig_dir, "kl_cumulative", "contribution"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "kl_analysis", "kl_cumulative", "contribution")
+    )
     plt.close()
 
 

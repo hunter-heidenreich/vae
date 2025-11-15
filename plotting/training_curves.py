@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
-from .core import make_plot_path, save_figure
+from .core import make_grouped_plot_path, save_figure
 
 
 def save_training_curves(
@@ -69,7 +69,9 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_yscale("log")  # Use log scale for better visualization
-        save_figure(make_plot_path(fig_dir, "learning_rate", "epochs"))
+        save_figure(
+            make_grouped_plot_path(fig_dir, "training", "learning_rate", "epochs")
+        )
         plt.close()
 
     # 2. ELBO plot
@@ -86,12 +88,28 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
             alpha=0.8,
             markersize=4,
         )
+
+        # Highlight epoch with lowest reconstruction error
+        min_recon_idx = np.argmin(test_recon_arr)
+        ax.scatter(
+            test_epochs[min_recon_idx],
+            -test_loss_arr[min_recon_idx],
+            marker="*",
+            s=200,
+            color="gold",
+            edgecolor="darkorange",
+            linewidth=2,
+            alpha=0.9,
+            zorder=10,
+            label=f"Best Recon (Epoch {int(test_epochs[min_recon_idx])})",
+        )
+
     ax.set_xlabel("Epoch")
     ax.set_ylabel("ELBO")
     ax.set_title("ELBO (Higher is Better)")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "elbo", "epochs"))
+    save_figure(make_grouped_plot_path(fig_dir, "training", "elbo", "epochs"))
     plt.close()
 
     # 3. Reconstruction loss plot
@@ -108,7 +126,9 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     ax.set_title("Reconstruction Loss")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "reconstruction_loss", "epochs"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "training", "reconstruction_loss", "epochs")
+    )
     plt.close()
 
     # 4. KL divergence plot
@@ -123,14 +143,16 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
     ax.set_title("KL Divergence")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "kl_loss", "epochs"))
+    save_figure(make_grouped_plot_path(fig_dir, "training", "kl_loss", "epochs"))
     plt.close()
 
     # 5. Loss scatter plot (BCE vs KL from test data colored by epoch)
     if len(test_epochs) > 0:
         fig, ax = plt.subplots(figsize=(10, 8))
         _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr)
-        save_figure(make_plot_path(fig_dir, "loss_scatter", "epochs"))
+        save_figure(
+            make_grouped_plot_path(fig_dir, "training", "loss_scatter", "epochs")
+        )
         plt.close()
 
 
@@ -156,7 +178,9 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
         ax.set_title("Learning Rate Schedule by Training Step")
         ax.grid(True, alpha=0.3)
         ax.set_yscale("log")  # Use log scale for better visualization
-        save_figure(make_plot_path(fig_dir, "learning_rate", "steps"))
+        save_figure(
+            make_grouped_plot_path(fig_dir, "training", "learning_rate", "steps")
+        )
         plt.close()
 
     # 2. ELBO step plot
@@ -166,7 +190,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("ELBO")
     ax.set_title("ELBO by Training Step (Higher is Better)")
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "elbo", "steps"))
+    save_figure(make_grouped_plot_path(fig_dir, "training", "elbo", "steps"))
     plt.close()
 
     # 3. Reconstruction loss step plot
@@ -178,7 +202,9 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("BCE Loss")
     ax.set_title("Reconstruction Loss by Training Step")
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "reconstruction_loss", "steps"))
+    save_figure(
+        make_grouped_plot_path(fig_dir, "training", "reconstruction_loss", "steps")
+    )
     plt.close()
 
     # 4. KL step plot
@@ -188,22 +214,7 @@ def _save_step_training_curves(train_step_history: dict, fig_dir: str):
     ax.set_ylabel("KL Loss")
     ax.set_title("KL Divergence by Training Step")
     ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "kl_loss", "steps"))
-    plt.close()
-
-    # 5. Combined step plot for comparison
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(steps, -loss_arr, "o-", alpha=0.8, markersize=2, linewidth=1, label="ELBO")
-    ax.plot(
-        steps, recon_arr, "s-", alpha=0.8, markersize=2, linewidth=1, label="BCE Loss"
-    )
-    ax.plot(steps, kl_arr, "^-", alpha=0.8, markersize=2, linewidth=1, label="KL Loss")
-    ax.set_xlabel("Training Step")
-    ax.set_ylabel("Loss")
-    ax.set_title("All Losses by Training Step")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    save_figure(make_plot_path(fig_dir, "all_losses", "steps"))
+    save_figure(make_grouped_plot_path(fig_dir, "training", "kl_loss", "steps"))
     plt.close()
 
 
@@ -277,6 +288,21 @@ def _plot_loss_scatter(ax, test_epochs, test_kl_arr, test_recon_arr):
                 zorder=10,
                 label="End",
             )
+
+        # Highlight point with lowest reconstruction error
+        min_recon_idx = np.argmin(test_recon_arr)
+        ax.scatter(
+            test_kl_arr[min_recon_idx],
+            test_recon_arr[min_recon_idx],
+            marker="*",
+            s=200,
+            color="gold",
+            edgecolor="darkorange",
+            linewidth=2,
+            alpha=0.9,
+            zorder=15,
+            label=f"Best Recon (Epoch {int(test_epochs[min_recon_idx])})",
+        )
 
     # Add legend
     if len(test_epochs) > 1:

@@ -15,13 +15,13 @@ from tqdm import tqdm
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
 from plotting import (collect_all_latent_data, compute_kl_per_dimension,
-                      make_plot_path, save_gradient_diagnostics,
+                      make_grouped_plot_path, save_gradient_diagnostics,
                       save_interpolation_and_sweep_figures,
                       save_kl_diagnostics_separate,
-                      save_latent_combined_figure, save_latent_marginals,
-                      save_logvar_combined_figure, save_logvar_marginals,
-                      save_recon_figure, save_samples_figure,
-                      save_training_curves)
+                      save_latent_combined_figure, save_latent_evolution_plots,
+                      save_latent_marginals, save_logvar_combined_figure,
+                      save_logvar_marginals, save_recon_figure,
+                      save_samples_figure, save_training_curves)
 from trainer_config import TrainerConfig
 
 # Analysis and formatting constants
@@ -277,8 +277,10 @@ class VAETrainer:
         """
         self.model.eval()
 
-        # Initialize metrics accumulator (no gradient analysis for validation)
-        metrics_accumulator = MetricsAccumulator(enable_gradient_analysis=False)
+        # Initialize metrics accumulator (no gradient analysis, but enable latent tracking)
+        metrics_accumulator = MetricsAccumulator(
+            enable_gradient_analysis=False, enable_latent_tracking=True
+        )
 
         # For KL per dimension computation
         kl_per_dim_accum = None
@@ -302,6 +304,29 @@ class VAETrainer:
                 # Compute KL per dimension
                 mu = output.mu
                 std = output.std
+
+                # Collect latent statistics per batch
+                # Statistics about mu (mean parameter)
+                mu_means_batch = (
+                    mu.mean(dim=0).cpu().numpy().tolist()
+                )  # Mean of mu across batch for each dim
+                mu_stds_batch = (
+                    mu.std(dim=0).cpu().numpy().tolist()
+                )  # Std of mu across batch for each dim
+
+                # Statistics about sigma (std parameter)
+                sigma_means_batch = (
+                    std.mean(dim=0).cpu().numpy().tolist()
+                )  # Mean of sigma across batch for each dim
+                sigma_stds_batch = (
+                    std.std(dim=0).cpu().numpy().tolist()
+                )  # Std of sigma across batch for each dim
+
+                # Add to accumulator (store statistics for both mu and sigma parameters)
+                metrics_accumulator.add_latent_stats(
+                    mu_means_batch, mu_stds_batch, sigma_means_batch, sigma_stds_batch
+                )
+
                 # Check if we're using log-variance parameterization
                 is_logvar = not (
                     self.model.config.use_softplus_std
@@ -350,6 +375,11 @@ class VAETrainer:
         self.history.record_epoch_metrics(val_metrics, epoch, is_train=False)
         # Add kl_per_dim separately since it's a different type
         self.history.val_history.setdefault("kl_per_dim", []).append(kl_per_dim_avg)
+
+        # Add latent statistics if available
+        latent_stats = metrics_accumulator.get_latent_statistics()
+        for stat_name, stat_values in latent_stats.items():
+            self.history.val_history.setdefault(stat_name, []).append(stat_values)
 
         # TensorBoard logging
         self._log_validation_step(val_metrics)
@@ -439,7 +469,7 @@ class VAETrainer:
             self.model,
             first_batch,
             self.device,
-            make_plot_path(self.fig_dir, "reconstructions"),
+            make_grouped_plot_path(self.fig_dir, "generation", "reconstructions"),
             n=self.config.n_recon,
         )
 
@@ -448,7 +478,7 @@ class VAETrainer:
             self.model,
             self.device,
             self.model.config.latent_dim,
-            make_plot_path(self.fig_dir, "samples"),
+            make_grouped_plot_path(self.fig_dir, "generation", "samples"),
             n=self.config.n_samples,
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
@@ -458,7 +488,7 @@ class VAETrainer:
             self.model,
             test_loader,
             self.device,
-            make_plot_path(self.fig_dir, "generation"),
+            make_grouped_plot_path(self.fig_dir, "generation", "generation"),
             steps=self.config.interp_steps,
             method=self.config.interp_method,
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
@@ -475,19 +505,25 @@ class VAETrainer:
 
         # Mean (mu) plots - using Z (sampled latents) for visualization
         save_latent_combined_figure(
-            Z, Y, make_plot_path(self.fig_dir, "latent_space", "combined")
+            Z,
+            Y,
+            make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "combined"),
         )
         save_latent_marginals(
-            Z, make_plot_path(self.fig_dir, "latent_space", "marginals")
+            Z,
+            make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "marginals"),
         )
 
         # Log variance (sigma/logvar) plots - convert std to logvar
         LogVar = np.log(Std**2)  # Convert std to log variance
         save_logvar_combined_figure(
-            LogVar, Y, make_plot_path(self.fig_dir, "latent_logvar", "combined")
+            LogVar,
+            Y,
+            make_grouped_plot_path(self.fig_dir, "latent_space", "logvar", "combined"),
         )
         save_logvar_marginals(
-            LogVar, make_plot_path(self.fig_dir, "latent_logvar", "marginals")
+            LogVar,
+            make_grouped_plot_path(self.fig_dir, "latent_space", "logvar", "marginals"),
         )
 
         # Training curves
@@ -508,6 +544,12 @@ class VAETrainer:
 
         # KL per dimension diagnostics (now creates separate plots)
         save_kl_diagnostics_separate(
+            self.history.get_val_history(),
+            self.fig_dir,
+        )
+
+        # Latent evolution plots (temporal evolution of latent dimension statistics)
+        save_latent_evolution_plots(
             self.history.get_val_history(),
             self.fig_dir,
         )

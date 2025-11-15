@@ -129,15 +129,17 @@ def make_plot_path(
     base_name: str,
     suffix: str = "",
     format: str = DEFAULT_FORMAT,
+    group_dir: str = "",
 ) -> str:
     """
-    Create a standardized plot file path.
+    Create a standardized plot file path with optional grouping.
 
     Args:
         fig_dir: Base directory for figures
         base_name: Base name for the plot (e.g., 'latent_space', 'training_curves')
         suffix: Optional suffix (e.g., 'epochs', 'steps', '2d', 'combined')
         format: File format extension
+        group_dir: Optional subdirectory for grouping related plots
 
     Returns:
         Full path to the plot file
@@ -147,7 +149,10 @@ def make_plot_path(
     else:
         filename = f"{base_name}.{format}"
 
-    return os.path.join(fig_dir, filename)
+    if group_dir:
+        return os.path.join(fig_dir, group_dir, filename)
+    else:
+        return os.path.join(fig_dir, filename)
 
 
 def split_plot_path(out_path: str, suffix: str) -> str:
@@ -169,3 +174,26 @@ def split_plot_path(out_path: str, suffix: str) -> str:
     base_name = path_obj.stem
     new_name = f"{base_name}_{suffix}"
     return str(path_obj.with_name(f"{new_name}{path_obj.suffix}"))
+
+
+def make_grouped_plot_path(
+    fig_dir: str,
+    group: str,
+    base_name: str,
+    suffix: str = "",
+    format: str = DEFAULT_FORMAT,
+) -> str:
+    """
+    Create a plot path within a specific group subdirectory.
+
+    Args:
+        fig_dir: Base directory for figures
+        group: Group name (subdirectory)
+        base_name: Base name for the plot
+        suffix: Optional suffix
+        format: File format extension
+
+    Returns:
+        Full path to the plot file in the group subdirectory
+    """
+    return make_plot_path(fig_dir, base_name, suffix, format, group_dir=group)
