@@ -278,8 +278,8 @@ def main():
         trainer.save_performance_metrics(performance_file)
         print(f"Performance metrics saved to: {performance_file}")
 
-        # Load best model and generate analysis plots
-        trainer.load_best_model()
+        # Generate analysis plots using complete training history
+        # (This uses current history for plotting, then loads best model only for generation)
         trainer.generate_analysis_plots(test_loader)
 
     finally:

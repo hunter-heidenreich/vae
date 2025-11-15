@@ -244,3 +244,28 @@ class VAE(nn.Module):
             kl_per_sample = 0.5 * torch.sum(mu.pow(2) + sigma.exp() - 1 - sigma, dim=1)
 
         return kl_per_sample.mean()
+
+    # ==================== Parameter Analysis ====================
+
+    def get_encoder_parameters(self):
+        """Get encoder parameters as a list."""
+        return list(self.encoder.parameters())
+
+    def get_decoder_parameters(self):
+        """Get decoder parameters as a list."""
+        return list(self.decoder.parameters())
+
+    def compute_parameter_norms(self) -> dict[str, float]:
+        """Compute L2 norms of encoder, decoder, and total parameters."""
+        encoder_params = self.get_encoder_parameters()
+        decoder_params = self.get_decoder_parameters()
+
+        encoder_norm = torch.sqrt(sum(p.norm(2).pow(2) for p in encoder_params)).item()
+        decoder_norm = torch.sqrt(sum(p.norm(2).pow(2) for p in decoder_params)).item()
+        total_norm = torch.sqrt(sum(p.norm(2).pow(2) for p in self.parameters())).item()
+
+        return {
+            "encoder_param_norm": encoder_norm,
+            "decoder_param_norm": decoder_norm,
+            "total_param_norm": total_norm,
+        }

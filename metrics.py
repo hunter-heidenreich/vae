@@ -40,13 +40,37 @@ class MetricsAccumulator:
             "learning_rate",
         }
 
-        # Define gradient analysis metrics
+        # Define gradient analysis metrics (expanded)
         self.gradient_metrics = {
+            # Original metrics
             "recon_grad_norm",
             "kl_grad_norm",
             "recon_kl_cosine",
             "recon_contrib",
             "kl_contrib",
+            # New encoder/decoder specific metrics
+            "recon_encoder_grad_norm",
+            "recon_decoder_grad_norm",
+            "kl_encoder_grad_norm",
+            "kl_decoder_grad_norm",
+            "total_encoder_grad_norm",
+            "total_decoder_grad_norm",
+            "recon_kl_encoder_cosine",
+            "recon_encoder_contrib",
+            "kl_encoder_contrib",
+        }
+
+        # Define parameter tracking metrics (always tracked)
+        self.parameter_metrics = {
+            "encoder_param_norm",
+            "decoder_param_norm",
+            "total_param_norm",
+            "encoder_param_change_norm",
+            "decoder_param_change_norm",
+            "total_param_change_norm",
+            "encoder_param_change_rel",
+            "decoder_param_change_rel",
+            "total_param_change_rel",
         }
 
         self._initialize_metrics()
@@ -55,6 +79,10 @@ class MetricsAccumulator:
         """Initialize all metric lists based on configuration."""
         # Always initialize base metrics
         for metric in self.base_metrics:
+            self.metrics[metric] = []
+
+        # Always initialize parameter metrics
+        for metric in self.parameter_metrics:
             self.metrics[metric] = []
 
         # Initialize gradient metrics if enabled

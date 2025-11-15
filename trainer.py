@@ -20,8 +20,9 @@ from plotting import (collect_all_latent_data, compute_kl_per_dimension,
                       save_kl_diagnostics_separate,
                       save_latent_combined_figure, save_latent_evolution_plots,
                       save_latent_marginals, save_logvar_combined_figure,
-                      save_logvar_marginals, save_recon_figure,
-                      save_samples_figure, save_training_curves)
+                      save_logvar_marginals, save_parameter_diagnostics,
+                      save_recon_figure, save_samples_figure,
+                      save_training_curves)
 from trainer_config import TrainerConfig
 
 # Analysis and formatting constants
@@ -81,6 +82,10 @@ class VAETrainer:
         # Training state
         self.global_step = 0
         self.history = TrainingHistory()
+
+        # Parameter tracking for weight magnitude analysis
+        self.previous_params = None
+        self.param_norms_history = []
 
         print("VAE Trainer initialized:")
         print(f"  Device: {self.device}")
@@ -150,6 +155,94 @@ class VAETrainer:
             total_norm_sq = total_norm_sq + g.norm(2).pow(2)
         return torch.sqrt(total_norm_sq).item()
 
+    def _copy_model_parameters(self) -> dict[str, list[torch.Tensor]]:
+        """Create a deep copy of current model parameters for change tracking."""
+        return {
+            "encoder": [
+                p.clone().detach() for p in self.model.get_encoder_parameters()
+            ],
+            "decoder": [
+                p.clone().detach() for p in self.model.get_decoder_parameters()
+            ],
+        }
+
+    def _compute_parameter_changes(self) -> dict[str, float]:
+        """Compute parameter change norms since last epoch."""
+        if self.previous_params is None:
+            # First epoch - initialize previous params and return zeros
+            self.previous_params = self._copy_model_parameters()
+            return {
+                "encoder_param_change_norm": 0.0,
+                "decoder_param_change_norm": 0.0,
+                "total_param_change_norm": 0.0,
+                "encoder_param_change_rel": 0.0,
+                "decoder_param_change_rel": 0.0,
+                "total_param_change_rel": 0.0,
+            }
+
+        # Get current parameters
+        current_encoder_params = self.model.get_encoder_parameters()
+        current_decoder_params = self.model.get_decoder_parameters()
+
+        # Compute parameter changes
+        encoder_changes = [
+            (curr - prev).detach()
+            for curr, prev in zip(
+                current_encoder_params, self.previous_params["encoder"]
+            )
+        ]
+        decoder_changes = [
+            (curr - prev).detach()
+            for curr, prev in zip(
+                current_decoder_params, self.previous_params["decoder"]
+            )
+        ]
+
+        # Compute change norms
+        encoder_change_norm = self._compute_grad_norm(encoder_changes)
+        decoder_change_norm = self._compute_grad_norm(decoder_changes)
+        total_change_norm = torch.sqrt(
+            torch.tensor(encoder_change_norm**2 + decoder_change_norm**2)
+        ).item()
+
+        # Compute current parameter norms for relative changes
+        encoder_current_norm = self._compute_grad_norm(
+            [p.detach() for p in current_encoder_params]
+        )
+        decoder_current_norm = self._compute_grad_norm(
+            [p.detach() for p in current_decoder_params]
+        )
+        total_current_norm = torch.sqrt(
+            torch.tensor(encoder_current_norm**2 + decoder_current_norm**2)
+        ).item()
+
+        # Compute relative changes (change_norm / current_norm)
+        encoder_change_rel = (
+            encoder_change_norm / encoder_current_norm
+            if encoder_current_norm > 0
+            else 0.0
+        )
+        decoder_change_rel = (
+            decoder_change_norm / decoder_current_norm
+            if decoder_current_norm > 0
+            else 0.0
+        )
+        total_change_rel = (
+            total_change_norm / total_current_norm if total_current_norm > 0 else 0.0
+        )
+
+        # Update previous parameters for next epoch
+        self.previous_params = self._copy_model_parameters()
+
+        return {
+            "encoder_param_change_norm": encoder_change_norm,
+            "decoder_param_change_norm": decoder_change_norm,
+            "total_param_change_norm": total_change_norm,
+            "encoder_param_change_rel": encoder_change_rel,
+            "decoder_param_change_rel": decoder_change_rel,
+            "total_param_change_rel": total_change_rel,
+        }
+
     def train_epoch(self, dataloader: DataLoader, epoch: int) -> int:
         """
         Train the model for one epoch.
@@ -200,6 +293,13 @@ class VAETrainer:
 
         # Record epoch-level averages
         epoch_averages = metrics_accumulator.get_averages()
+
+        # Add parameter magnitude tracking
+        param_norms = self.model.compute_parameter_norms()
+        param_changes = self._compute_parameter_changes()
+        epoch_averages.update(param_norms)
+        epoch_averages.update(param_changes)
+
         self.history.record_epoch_metrics(epoch_averages, epoch, is_train=True)
 
         return metrics_accumulator.get_count()
@@ -371,6 +471,10 @@ class VAETrainer:
             f"====> Active units: {active_count}/{len(kl_per_dim_avg)} (threshold={ACTIVE_UNIT_KL_THRESHOLD})"
         )
 
+        # Add parameter norms to validation metrics (but not parameter changes, as those are training-specific)
+        param_norms = self.model.compute_parameter_norms()
+        val_metrics.update(param_norms)
+
         # Record validation history
         self.history.record_epoch_metrics(val_metrics, epoch, is_train=False)
         # Add kl_per_dim separately since it's a different type
@@ -398,6 +502,7 @@ class VAETrainer:
 
         best_val_loss = float("inf")
         best_val_metrics = None
+        best_epoch = 0
         final_val_metrics = None
 
         for epoch in range(self.config.num_epochs):
@@ -427,8 +532,10 @@ class VAETrainer:
                     ),
                 )
 
+            # Check for new best model after every epoch
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                best_epoch = epoch + 1
                 best_val_metrics = val_metrics.copy()  # Store all best metrics
                 self.save_checkpoint(
                     epoch=epoch + 1,
@@ -440,31 +547,90 @@ class VAETrainer:
 
         # Store final metrics for performance logging
         self.best_val_metrics = best_val_metrics
+        self.best_epoch = best_epoch
         self.final_val_metrics = final_val_metrics
 
-    def load_best_model(self):
-        """Load the best model checkpoint for analysis."""
+    def load_best_model_for_generation(self):
+        """
+        Load the best model weights for generation/evaluation, preserving current training history.
+
+        This method only loads the model weights, not the training history, so we can use
+        the best model for generation while keeping the complete training history for plotting.
+        """
         best_checkpoint_path = os.path.join(self.ckpt_dir, "checkpoint_best.pt")
         if os.path.exists(best_checkpoint_path):
             print(f"Loading best model checkpoint from: {best_checkpoint_path}")
-            checkpoint = self.load_checkpoint(best_checkpoint_path)
-            print(f"Loaded best model from epoch {checkpoint.get('epoch', 'unknown')}")
+            checkpoint = torch.load(best_checkpoint_path, map_location=self.device)
+
+            # Only load model weights, preserve current training history and other state
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+            best_epoch = checkpoint.get("epoch", "unknown")
+            print(f"Loaded best model weights from epoch {best_epoch}")
+            return best_epoch
         else:
             print("Warning: Best model checkpoint not found, using current model state")
+            return None
 
     def generate_analysis_plots(self, test_loader: DataLoader):
         """
         Generate all post-training analysis plots and figures.
+
+        Uses complete training history for plotting, but loads best model for generation tasks.
 
         Args:
             test_loader: Test data loader for analysis
         """
         print("Generating analysis plots...")
 
+        # === PART 1: PLOTTING (using complete training history) ===
+
+        # Training curves (highlight best epoch)
+        save_training_curves(
+            self.history.get_train_history(),
+            self.history.get_val_history(),
+            self.history.get_train_step_history(),
+            self.fig_dir,
+            best_epoch=getattr(self, "best_epoch", None),
+        )
+
+        # Gradient diagnostics (only if gradient analysis was enabled)
+        if self.config.analyze_gradients:
+            save_gradient_diagnostics(
+                self.history.get_train_history(),
+                self.history.get_train_step_history(),
+                self.fig_dir,
+                best_epoch=getattr(self, "best_epoch", None),
+            )
+
+        # Parameter magnitude and change diagnostics (always generated)
+        save_parameter_diagnostics(
+            self.history.get_train_history(),
+            self.history.get_val_history(),
+            self.fig_dir,
+            best_epoch=getattr(self, "best_epoch", None),
+        )
+
+        # KL per dimension diagnostics (now creates separate plots)
+        save_kl_diagnostics_separate(
+            self.history.get_val_history(),
+            self.fig_dir,
+        )
+
+        # Latent evolution plots (temporal evolution of latent dimension statistics)
+        save_latent_evolution_plots(
+            self.history.get_val_history(),
+            self.fig_dir,
+        )
+
+        # === PART 2: GENERATION (using best model) ===
+
+        print("Loading best model for generation tasks...")
+        self.load_best_model_for_generation()
+
         # Use a small batch from test set for reconstructions
         first_batch = next(iter(test_loader))[0]
 
-        # Reconstructions
+        # Reconstructions (using best model)
         save_recon_figure(
             self.model,
             first_batch,
@@ -473,7 +639,7 @@ class VAETrainer:
             n=self.config.n_recon,
         )
 
-        # Generated samples
+        # Generated samples (using best model)
         save_samples_figure(
             self.model,
             self.device,
@@ -514,7 +680,7 @@ class VAETrainer:
             make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "marginals"),
         )
 
-        # Log variance (sigma/logvar) plots - convert std to logvar
+        # Log variance (sigma/logvar) plots - convert std to logvar (using best model)
         LogVar = np.log(Std**2)  # Convert std to log variance
         save_logvar_combined_figure(
             LogVar,
@@ -526,81 +692,129 @@ class VAETrainer:
             make_grouped_plot_path(self.fig_dir, "latent_space", "logvar", "marginals"),
         )
 
-        # Training curves
-        save_training_curves(
-            self.history.get_train_history(),
-            self.history.get_val_history(),
-            self.history.get_train_step_history(),
-            self.fig_dir,
-        )
-
-        # Gradient diagnostics (only if gradient analysis was enabled)
-        if self.config.analyze_gradients:
-            save_gradient_diagnostics(
-                self.history.get_train_history(),
-                self.history.get_train_step_history(),
-                self.fig_dir,
-            )
-
-        # KL per dimension diagnostics (now creates separate plots)
-        save_kl_diagnostics_separate(
-            self.history.get_val_history(),
-            self.fig_dir,
-        )
-
-        # Latent evolution plots (temporal evolution of latent dimension statistics)
-        save_latent_evolution_plots(
-            self.history.get_val_history(),
-            self.fig_dir,
-        )
-
         print(f"Analysis plots saved to {self.fig_dir}")
 
     def _compute_gradient_metrics(self, output) -> dict[str, float]:
         """
-        Compute detailed gradient analysis metrics.
+        Compute detailed gradient analysis metrics with encoder/decoder separation.
 
         Args:
             output: VAEOutput from forward pass
 
         Returns:
-            Dictionary of gradient metrics
+            Dictionary of gradient metrics including encoder/decoder breakdown
         """
-        params = list(self.model.parameters())
+        # Get parameter groups
+        encoder_params = self.model.get_encoder_parameters()
+        decoder_params = self.model.get_decoder_parameters()
+        all_params = list(self.model.parameters())
 
-        # Compute reconstruction gradients
+        # === RECONSTRUCTION GRADIENTS ===
+
+        # Total reconstruction gradients
         recon_grads = torch.autograd.grad(
             output.loss_recon,
-            params,
+            all_params,
             retain_graph=True,
             create_graph=False,
             allow_unused=True,
         )
         recon_grads = [
             g if g is not None else torch.zeros_like(p)
-            for g, p in zip(recon_grads, params)
+            for g, p in zip(recon_grads, all_params)
         ]
         recon_grad_norm = self._compute_grad_norm(recon_grads)
 
-        # Compute KL gradients
+        # Encoder-only reconstruction gradients
+        recon_encoder_grads = torch.autograd.grad(
+            output.loss_recon,
+            encoder_params,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=True,
+        )
+        recon_encoder_grads = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(recon_encoder_grads, encoder_params)
+        ]
+        recon_encoder_grad_norm = self._compute_grad_norm(recon_encoder_grads)
+
+        # Decoder-only reconstruction gradients
+        recon_decoder_grads = torch.autograd.grad(
+            output.loss_recon,
+            decoder_params,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=True,
+        )
+        recon_decoder_grads = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(recon_decoder_grads, decoder_params)
+        ]
+        recon_decoder_grad_norm = self._compute_grad_norm(recon_decoder_grads)
+
+        # === KL GRADIENTS ===
+
+        # Total KL gradients (should be encoder-only)
         kl_grads = torch.autograd.grad(
             output.loss_kl,
-            params,
+            all_params,
             retain_graph=True,
             create_graph=False,
             allow_unused=True,
         )
         kl_grads = [
             g if g is not None else torch.zeros_like(p)
-            for g, p in zip(kl_grads, params)
+            for g, p in zip(kl_grads, all_params)
         ]
         kl_grad_norm = self._compute_grad_norm(kl_grads)
 
-        # Compute cosine similarity between recon and KL gradients
+        # Encoder-only KL gradients (should match total KL)
+        kl_encoder_grads = torch.autograd.grad(
+            output.loss_kl,
+            encoder_params,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=True,
+        )
+        kl_encoder_grads = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(kl_encoder_grads, encoder_params)
+        ]
+        kl_encoder_grad_norm = self._compute_grad_norm(kl_encoder_grads)
+
+        # Decoder KL gradients (should be ~0)
+        kl_decoder_grads = torch.autograd.grad(
+            output.loss_kl,
+            decoder_params,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=True,
+        )
+        kl_decoder_grads = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(kl_decoder_grads, decoder_params)
+        ]
+        kl_decoder_grad_norm = self._compute_grad_norm(kl_decoder_grads)
+
+        # === TOTAL GRADIENTS (RECON + KL) ===
+
+        # Total encoder gradients (recon + KL on encoder)
+        total_encoder_grad_norm_sq = (
+            recon_encoder_grad_norm**2 + kl_encoder_grad_norm**2
+        )
+        total_encoder_grad_norm = torch.sqrt(
+            torch.tensor(total_encoder_grad_norm_sq)
+        ).item()
+
+        # Total decoder gradients (only recon, KL should be ~0)
+        total_decoder_grad_norm = recon_decoder_grad_norm  # KL decoder should be ~0
+
+        # === COSINE SIMILARITIES ===
+
+        # Original total recon vs KL cosine
         recon_kl_cosine = 0.0
         if recon_grad_norm > 0 and kl_grad_norm > 0:
-            # Compute dot product efficiently - avoid torch.stack
-            # Start with first pair to ensure we have a tensor
             grad_pairs = list(zip(recon_grads, kl_grads))
             if grad_pairs:
                 dot_product = (grad_pairs[0][0] * grad_pairs[0][1]).sum()
@@ -608,7 +822,21 @@ class VAETrainer:
                     dot_product = dot_product + (r * k).sum()
                 recon_kl_cosine = dot_product.item() / (recon_grad_norm * kl_grad_norm)
 
-        # Compute relative contributions to total gradient direction
+        # Encoder: recon vs KL cosine
+        recon_kl_encoder_cosine = 0.0
+        if recon_encoder_grad_norm > 0 and kl_encoder_grad_norm > 0:
+            grad_pairs = list(zip(recon_encoder_grads, kl_encoder_grads))
+            if grad_pairs:
+                dot_product = (grad_pairs[0][0] * grad_pairs[0][1]).sum()
+                for r, k in grad_pairs[1:]:
+                    dot_product = dot_product + (r * k).sum()
+                recon_kl_encoder_cosine = dot_product.item() / (
+                    recon_encoder_grad_norm * kl_encoder_grad_norm
+                )
+
+        # === RELATIVE CONTRIBUTIONS ===
+
+        # Original total contributions
         total_grad_norm_sq = recon_grad_norm**2 + kl_grad_norm**2
         recon_contrib = 0.0
         kl_contrib = 0.0
@@ -616,12 +844,34 @@ class VAETrainer:
             recon_contrib = recon_grad_norm**2 / total_grad_norm_sq
             kl_contrib = kl_grad_norm**2 / total_grad_norm_sq
 
+        # Encoder contributions (recon vs KL on encoder)
+        encoder_grad_norm_sq = recon_encoder_grad_norm**2 + kl_encoder_grad_norm**2
+        recon_encoder_contrib = 0.0
+        kl_encoder_contrib = 0.0
+        if encoder_grad_norm_sq > 0:
+            recon_encoder_contrib = recon_encoder_grad_norm**2 / encoder_grad_norm_sq
+            kl_encoder_contrib = kl_encoder_grad_norm**2 / encoder_grad_norm_sq
+
         return {
+            # === ORIGINAL METRICS ===
             "recon_grad_norm": recon_grad_norm,
             "kl_grad_norm": kl_grad_norm,
             "recon_kl_cosine": recon_kl_cosine,
             "recon_contrib": recon_contrib,
             "kl_contrib": kl_contrib,
+            # === RECONSTRUCTION GRADIENTS BY COMPONENT ===
+            "recon_encoder_grad_norm": recon_encoder_grad_norm,
+            "recon_decoder_grad_norm": recon_decoder_grad_norm,
+            # === KL GRADIENTS BY COMPONENT ===
+            "kl_encoder_grad_norm": kl_encoder_grad_norm,
+            "kl_decoder_grad_norm": kl_decoder_grad_norm,  # Should be ~0
+            # === TOTAL GRADIENTS BY COMPONENT ===
+            "total_encoder_grad_norm": total_encoder_grad_norm,
+            "total_decoder_grad_norm": total_decoder_grad_norm,
+            # === ENCODER-SPECIFIC ANALYSIS ===
+            "recon_kl_encoder_cosine": recon_kl_encoder_cosine,
+            "recon_encoder_contrib": recon_encoder_contrib,
+            "kl_encoder_contrib": kl_encoder_contrib,
         }
 
     def _handle_gradient_clipping(self) -> dict[str, float]:

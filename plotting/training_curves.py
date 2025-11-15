@@ -8,19 +8,25 @@ from .core import make_grouped_plot_path, save_figure
 
 
 def save_training_curves(
-    train_history: dict, test_history: dict, train_step_history: dict, fig_dir: str
+    train_history: dict,
+    test_history: dict,
+    train_step_history: dict,
+    fig_dir: str,
+    best_epoch: int = None,
 ):
     """Save separate training curve plots for epoch-level and step-level data."""
 
     # Save epoch-level plots
-    _save_epoch_training_curves(train_history, test_history, fig_dir)
+    _save_epoch_training_curves(train_history, test_history, fig_dir, best_epoch)
 
     # Save step-level plots if available
     if train_step_history and train_step_history.get("step"):
         _save_step_training_curves(train_step_history, fig_dir)
 
 
-def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir: str):
+def _save_epoch_training_curves(
+    train_history: dict, test_history: dict, fig_dir: str, best_epoch: int = None
+):
     """Save epoch-level training curves as separate plots."""
     # Use epochs instead of steps
     train_epochs = np.array([])
@@ -89,20 +95,36 @@ def _save_epoch_training_curves(train_history: dict, test_history: dict, fig_dir
             markersize=4,
         )
 
-        # Highlight epoch with lowest reconstruction error
-        min_recon_idx = np.argmin(test_recon_arr)
-        ax.scatter(
-            test_epochs[min_recon_idx],
-            -test_loss_arr[min_recon_idx],
-            marker="*",
-            s=200,
-            color="gold",
-            edgecolor="darkorange",
-            linewidth=2,
-            alpha=0.9,
-            zorder=10,
-            label=f"Best Recon (Epoch {int(test_epochs[min_recon_idx])})",
-        )
+        # Highlight best epoch (lowest validation loss) if available
+        if best_epoch is not None and best_epoch in test_epochs:
+            best_epoch_idx = np.where(test_epochs == best_epoch)[0][0]
+            ax.scatter(
+                test_epochs[best_epoch_idx],
+                -test_loss_arr[best_epoch_idx],
+                marker="*",
+                s=200,
+                color="gold",
+                edgecolor="darkorange",
+                linewidth=2,
+                alpha=0.9,
+                zorder=10,
+                label=f"Best Model (Epoch {int(best_epoch)})",
+            )
+        else:
+            # Fallback: Highlight epoch with lowest reconstruction error
+            min_recon_idx = np.argmin(test_recon_arr)
+            ax.scatter(
+                test_epochs[min_recon_idx],
+                -test_loss_arr[min_recon_idx],
+                marker="*",
+                s=200,
+                color="gold",
+                edgecolor="darkorange",
+                linewidth=2,
+                alpha=0.9,
+                zorder=10,
+                label=f"Best Recon (Epoch {int(test_epochs[min_recon_idx])})",
+            )
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel("ELBO")

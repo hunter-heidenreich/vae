@@ -10,7 +10,8 @@ from .data import (apply_pca_if_needed, collect_all_latent_data,
 from .generation import (save_interpolation_and_sweep_figures,
                          save_interpolation_figure, save_latent_sweep_figure,
                          save_recon_figure, save_samples_figure)
-from .gradient_analysis import save_gradient_diagnostics
+from .gradient_analysis import (save_gradient_diagnostics,
+                                save_parameter_diagnostics)
 from .kl_analysis import save_kl_diagnostics_separate
 from .latent_space import (save_latent_combined_figure,
                            save_latent_evolution_plots, save_latent_marginals,
@@ -51,5 +52,6 @@ __all__ = [
     # Diagnostic plots
     "save_training_curves",
     "save_gradient_diagnostics",
+    "save_parameter_diagnostics",
     "save_kl_diagnostics_separate",
 ]
