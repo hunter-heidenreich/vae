@@ -14,18 +14,25 @@ from tqdm import tqdm
 
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
-from plotting import (collect_all_latent_data, compute_kl_per_dimension,
-                      make_grouped_plot_path, save_gradient_diagnostics,
-                      save_interpolation_and_sweep_figures,
-                      save_kl_diagnostics_separate,
-                      save_latent_combined_figure, save_latent_evolution_plots,
-                      save_latent_marginals, save_logvar_combined_figure,
-                      save_logvar_marginals, save_parameter_diagnostics,
-                      save_recon_figure, save_samples_figure,
-                      save_training_curves)
+from plotting import (
+    collect_all_latent_data,
+    compute_kl_per_dimension,
+    make_grouped_plot_path,
+    save_gradient_diagnostics,
+    save_interpolation_and_sweep_figures,
+    save_kl_diagnostics_separate,
+    save_latent_combined_figure,
+    save_latent_evolution_plots,
+    save_latent_marginals,
+    save_logvar_combined_figure,
+    save_logvar_marginals,
+    save_parameter_diagnostics,
+    save_recon_figure,
+    save_samples_figure,
+    save_training_curves,
+)
 from trainer_config import TrainerConfig
 
-# Analysis and formatting constants
 ACTIVE_UNIT_KL_THRESHOLD = 0.1
 DEFAULT_INTERPOLATION_SWEEP_STEPS = 15
 DEFAULT_SAMPLES_GRID_SIZE = (8, 8)
@@ -54,36 +61,29 @@ class VAETrainer:
         self.model = model
         self.config = config
 
-        # Setup device
         self.device = self._setup_device()
         self.model = self.model.to(self.device)
 
-        # Setup random seed
         if config.seed is not None:
             torch.manual_seed(config.seed)
             np.random.seed(config.seed)
 
-        # Create optimizer
         self.optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
 
-        # Setup directories
         self.run_dir = config.get_run_dir()
         self.ckpt_dir = os.path.join(self.run_dir, "checkpoints")
         self.fig_dir = os.path.join(self.run_dir, "figures")
         self._ensure_directories()
 
-        # Setup TensorBoard writer
         self.writer = SummaryWriter(self.run_dir)
 
-        # Training state
         self.global_step = 0
         self.history = TrainingHistory()
 
-        # Parameter tracking for weight magnitude analysis
         self.previous_params = None
         self.param_norms_history = []
 
@@ -106,7 +106,7 @@ class VAETrainer:
                     if mps is not None and mps.is_available():
                         return torch.device("mps")
             except Exception:
-                pass  # Fall back to CPU if MPS check fails
+                pass
 
             return torch.device("cpu")
         else:
@@ -132,7 +132,6 @@ class VAETrainer:
             self.config.warmup_steps <= 0
             or self.global_step >= self.config.warmup_steps
         ):
-            # No warmup or warmup period finished
             return self.config.learning_rate
 
         # Linear warmup: lr = base_lr * ((current_step + 1) / warmup_steps)
@@ -169,7 +168,6 @@ class VAETrainer:
     def _compute_parameter_changes(self) -> dict[str, float]:
         """Compute parameter change norms since last epoch."""
         if self.previous_params is None:
-            # First epoch - initialize previous params and return zeros
             self.previous_params = self._copy_model_parameters()
             return {
                 "encoder_param_change_norm": 0.0,
@@ -180,11 +178,9 @@ class VAETrainer:
                 "total_param_change_rel": 0.0,
             }
 
-        # Get current parameters
         current_encoder_params = self.model.get_encoder_parameters()
         current_decoder_params = self.model.get_decoder_parameters()
 
-        # Compute parameter changes
         encoder_changes = [
             (curr - prev).detach()
             for curr, prev in zip(
@@ -198,14 +194,12 @@ class VAETrainer:
             )
         ]
 
-        # Compute change norms
         encoder_change_norm = self._compute_grad_norm(encoder_changes)
         decoder_change_norm = self._compute_grad_norm(decoder_changes)
         total_change_norm = torch.sqrt(
             torch.tensor(encoder_change_norm**2 + decoder_change_norm**2)
         ).item()
 
-        # Compute current parameter norms for relative changes
         encoder_current_norm = self._compute_grad_norm(
             [p.detach() for p in current_encoder_params]
         )
@@ -216,7 +210,6 @@ class VAETrainer:
             torch.tensor(encoder_current_norm**2 + decoder_current_norm**2)
         ).item()
 
-        # Compute relative changes (change_norm / current_norm)
         encoder_change_rel = (
             encoder_change_norm / encoder_current_norm
             if encoder_current_norm > 0
@@ -231,7 +224,6 @@ class VAETrainer:
             total_change_norm / total_current_norm if total_current_norm > 0 else 0.0
         )
 
-        # Update previous parameters for next epoch
         self.previous_params = self._copy_model_parameters()
 
         return {
@@ -256,30 +248,23 @@ class VAETrainer:
         """
         self.model.train()
 
-        # Initialize metrics accumulator
         metrics_accumulator = MetricsAccumulator(self.config.analyze_gradients)
-
         progress_bar = tqdm(dataloader, desc=f"Training Epoch {epoch}")
 
         for _, (data, _) in enumerate(progress_bar):
-            # Compute metrics every log_interval steps (including step 0)
             should_compute_metrics = self.global_step % self.config.log_interval == 0
             step_metrics = self._train_step(data, return_metrics=should_compute_metrics)
 
-            # Increment global step counter
             self.global_step += 1
 
-            # Logging and accumulation
             if step_metrics is not None:
                 metrics_accumulator.add_step(step_metrics)
                 self._log_training_step_from_metrics(step_metrics)
 
-                # Store step-level metrics in history for detailed analysis
                 self.history.record_step_metrics(
                     step_metrics, self.global_step - 1, is_train=True
                 )
 
-                # Update progress bar with latest metrics
                 latest_metrics = metrics_accumulator.get_latest()
                 progress_bar.set_postfix(
                     {
@@ -291,10 +276,8 @@ class VAETrainer:
                     }
                 )
 
-        # Record epoch-level averages
         epoch_averages = metrics_accumulator.get_averages()
 
-        # Add parameter magnitude tracking
         param_norms = self.model.compute_parameter_norms()
         param_changes = self._compute_parameter_changes()
         epoch_averages.update(param_norms)
@@ -319,7 +302,6 @@ class VAETrainer:
         """
         data = data.to(self.device)
 
-        # Forward pass
         self.optimizer.zero_grad()
         output = self.model(
             data,
@@ -337,19 +319,13 @@ class VAETrainer:
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = current_lr
 
-        # Backward pass
         output.loss.backward()
-
-        # Gradient norms and clipping
         grad_norms = self._handle_gradient_clipping()
-
-        # Optimizer step
         self.optimizer.step()
 
         if not return_metrics:
             return
 
-        # Collect all step metrics
         step_metrics = {
             "loss": output.loss.item(),
             "recon": output.loss_recon.item(),
@@ -359,7 +335,6 @@ class VAETrainer:
             "learning_rate": current_lr,
         }
 
-        # Add gradient analysis metrics if enabled
         step_metrics.update(step_grad_metrics)
 
         return step_metrics
@@ -377,12 +352,10 @@ class VAETrainer:
         """
         self.model.eval()
 
-        # Initialize metrics accumulator (no gradient analysis, but enable latent tracking)
         metrics_accumulator = MetricsAccumulator(
             enable_gradient_analysis=False, enable_latent_tracking=True
         )
 
-        # For KL per dimension computation
         kl_per_dim_accum = None
 
         with torch.no_grad():
@@ -393,7 +366,6 @@ class VAETrainer:
                     compute_loss=True,
                 )
 
-                # Collect step metrics
                 step_metrics = {
                     "loss": output.loss.item(),
                     "recon": output.loss_recon.item(),
@@ -401,28 +373,14 @@ class VAETrainer:
                 }
                 metrics_accumulator.add_step(step_metrics)
 
-                # Compute KL per dimension
                 mu = output.mu
                 std = output.std
 
-                # Collect latent statistics per batch
-                # Statistics about mu (mean parameter)
-                mu_means_batch = (
-                    mu.mean(dim=0).cpu().numpy().tolist()
-                )  # Mean of mu across batch for each dim
-                mu_stds_batch = (
-                    mu.std(dim=0).cpu().numpy().tolist()
-                )  # Std of mu across batch for each dim
+                mu_means_batch = mu.mean(dim=0).cpu().numpy().tolist()
+                mu_stds_batch = mu.std(dim=0).cpu().numpy().tolist()
+                sigma_means_batch = std.mean(dim=0).cpu().numpy().tolist()
+                sigma_stds_batch = std.std(dim=0).cpu().numpy().tolist()
 
-                # Statistics about sigma (std parameter)
-                sigma_means_batch = (
-                    std.mean(dim=0).cpu().numpy().tolist()
-                )  # Mean of sigma across batch for each dim
-                sigma_stds_batch = (
-                    std.std(dim=0).cpu().numpy().tolist()
-                )  # Std of sigma across batch for each dim
-
-                # Add to accumulator (store statistics for both mu and sigma parameters)
                 metrics_accumulator.add_latent_stats(
                     mu_means_batch, mu_stds_batch, sigma_means_batch, sigma_stds_batch
                 )
@@ -433,15 +391,12 @@ class VAETrainer:
                     or self.model.config.bound_std is not None
                 )
                 if is_logvar:
-                    # std is derived from log-variance, so we need to get the original sigma
-                    logvar = (
-                        2 * std.log()
-                    )  # logvar = 2 * log(std) when std = exp(0.5 * logvar)
+                    # logvar = 2 * log(std) when std = exp(0.5 * logvar)
+                    logvar = 2 * std.log()
                     kl_per_dim_batch = compute_kl_per_dimension(
                         mu, logvar, is_logvar=True
                     )
                 else:
-                    # std is actual standard deviation
                     kl_per_dim_batch = compute_kl_per_dimension(
                         mu, std, is_logvar=False
                     )
@@ -451,16 +406,13 @@ class VAETrainer:
                 else:
                     kl_per_dim_accum += kl_per_dim_batch
 
-        # Get averaged metrics
         val_metrics = metrics_accumulator.get_averages()
         n_batches = metrics_accumulator.get_count()
 
-        # Average KL per dimension
         kl_per_dim_avg = []
         if kl_per_dim_accum is not None:
             kl_per_dim_avg = (kl_per_dim_accum / n_batches).cpu().numpy().tolist()
 
-        # Print validation results
         print(
             f"====> Validation loss: {val_metrics['loss']:.4f} "
             f"(BCE: {val_metrics['recon']:.4f}, KLD: {val_metrics['kl']:.4f})"
@@ -475,17 +427,13 @@ class VAETrainer:
         param_norms = self.model.compute_parameter_norms()
         val_metrics.update(param_norms)
 
-        # Record validation history
         self.history.record_epoch_metrics(val_metrics, epoch, is_train=False)
-        # Add kl_per_dim separately since it's a different type
         self.history.val_history.setdefault("kl_per_dim", []).append(kl_per_dim_avg)
 
-        # Add latent statistics if available
         latent_stats = metrics_accumulator.get_latent_statistics()
         for stat_name, stat_values in latent_stats.items():
             self.history.val_history.setdefault(stat_name, []).append(stat_values)
 
-        # TensorBoard logging
         self._log_validation_step(val_metrics)
 
         return val_metrics
@@ -508,21 +456,17 @@ class VAETrainer:
         for epoch in range(self.config.num_epochs):
             print(f"Epoch {epoch + 1}/{self.config.num_epochs}")
 
-            # Train for one epoch
             self.train_epoch(train_loader, epoch + 1)
 
-            # Validate
             val_metrics = self.validate(test_loader, epoch + 1)
             val_loss = val_metrics["loss"]
-            final_val_metrics = val_metrics  # Keep updating to get final metrics
+            final_val_metrics = val_metrics
 
-            # Save checkpoints
             self.save_checkpoint(
                 epoch=epoch + 1,
                 filepath=os.path.join(self.ckpt_dir, "checkpoint_last.pt"),
             )
 
-            # Also keep a rolling epoch checkpoint every N epochs
             if (epoch + 1) % self.config.checkpoint_interval == 0:
                 self.save_checkpoint(
                     epoch=epoch + 1,
@@ -532,11 +476,10 @@ class VAETrainer:
                     ),
                 )
 
-            # Check for new best model after every epoch
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_epoch = epoch + 1
-                best_val_metrics = val_metrics.copy()  # Store all best metrics
+                best_val_metrics = val_metrics.copy()
                 self.save_checkpoint(
                     epoch=epoch + 1,
                     filepath=os.path.join(self.ckpt_dir, "checkpoint_best.pt"),
@@ -545,7 +488,6 @@ class VAETrainer:
 
         print(f"Training completed! Best validation loss: {best_val_loss:.4f}")
 
-        # Store final metrics for performance logging
         self.best_val_metrics = best_val_metrics
         self.best_epoch = best_epoch
         self.final_val_metrics = final_val_metrics
@@ -584,7 +526,6 @@ class VAETrainer:
 
         # === PART 1: PLOTTING (using complete training history) ===
 
-        # Training curves (highlight best epoch)
         save_training_curves(
             self.history.get_train_history(),
             self.history.get_val_history(),
@@ -593,7 +534,6 @@ class VAETrainer:
             best_epoch=getattr(self, "best_epoch", None),
         )
 
-        # Gradient diagnostics (only if gradient analysis was enabled)
         if self.config.analyze_gradients:
             save_gradient_diagnostics(
                 self.history.get_train_history(),
@@ -602,7 +542,6 @@ class VAETrainer:
                 best_epoch=getattr(self, "best_epoch", None),
             )
 
-        # Parameter magnitude and change diagnostics (always generated)
         save_parameter_diagnostics(
             self.history.get_train_history(),
             self.history.get_val_history(),
@@ -610,13 +549,11 @@ class VAETrainer:
             best_epoch=getattr(self, "best_epoch", None),
         )
 
-        # KL per dimension diagnostics (now creates separate plots)
         save_kl_diagnostics_separate(
             self.history.get_val_history(),
             self.fig_dir,
         )
 
-        # Latent evolution plots (temporal evolution of latent dimension statistics)
         save_latent_evolution_plots(
             self.history.get_val_history(),
             self.fig_dir,
@@ -627,10 +564,8 @@ class VAETrainer:
         print("Loading best model for generation tasks...")
         self.load_best_model_for_generation()
 
-        # Use a small batch from test set for reconstructions
         first_batch = next(iter(test_loader))[0]
 
-        # Reconstructions (using best model)
         save_recon_figure(
             self.model,
             first_batch,
@@ -639,7 +574,6 @@ class VAETrainer:
             n=self.config.n_recon,
         )
 
-        # Generated samples (using best model)
         save_samples_figure(
             self.model,
             self.device,
@@ -649,7 +583,6 @@ class VAETrainer:
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
 
-        # Interpolation and latent sweep figures (creates separate files)
         save_interpolation_and_sweep_figures(
             self.model,
             test_loader,
@@ -660,7 +593,7 @@ class VAETrainer:
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
         )
 
-        # Latent space analysis (mean and log variance) - OPTIMIZED: Single pass over data
+        # OPTIMIZED: Single pass over data
         print("Collecting latent space data (single pass)...")
         Z, Mu, Std, Y = collect_all_latent_data(
             self.model,
@@ -669,7 +602,6 @@ class VAETrainer:
             max_batches=self.config.max_latent_batches,
         )
 
-        # Mean (mu) plots - using Z (sampled latents) for visualization
         save_latent_combined_figure(
             Z,
             Y,
@@ -680,8 +612,7 @@ class VAETrainer:
             make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "marginals"),
         )
 
-        # Log variance (sigma/logvar) plots - convert std to logvar (using best model)
-        LogVar = np.log(Std**2)  # Convert std to log variance
+        LogVar = np.log(Std**2)
         save_logvar_combined_figure(
             LogVar,
             Y,
@@ -704,7 +635,6 @@ class VAETrainer:
         Returns:
             Dictionary of gradient metrics including encoder/decoder breakdown
         """
-        # Get parameter groups
         encoder_params = self.model.get_encoder_parameters()
         decoder_params = self.model.get_decoder_parameters()
         all_params = list(self.model.parameters())
@@ -881,24 +811,19 @@ class VAETrainer:
         Returns:
             Dictionary with 'realized' and 'unclipped' gradient norms
         """
-        # Get all parameters that have gradients
         params = [p for p in self.model.parameters() if p.grad is not None]
         if not params:
-            # Handle edge case of no gradients
             return {"realized": 0.0, "unclipped": 0.0}
 
-        # Use float('inf') as the max_norm to ONLY compute the norm
-        # if no clipping is desired.
+        # Use float('inf') as the max_norm to ONLY compute the norm if no clipping is desired
         max_norm = self.config.max_grad_norm
         if max_norm is None:
             max_norm = float("inf")
 
         # clip_grad_norm_ computes and returns the total unclipped norm
-        # This is the only norm computation we need - no redundant work!
         unclipped_grad_norm = clip_grad_norm_(params, max_norm=max_norm).item()
 
         if self.config.max_grad_norm is not None:
-            # The realized norm is the smaller of the two
             realized_grad_norm = min(unclipped_grad_norm, self.config.max_grad_norm)
         else:
             realized_grad_norm = unclipped_grad_norm
@@ -910,7 +835,6 @@ class VAETrainer:
 
     def _log_training_step_from_metrics(self, step_metrics: dict[str, float]):
         """Log training step metrics to TensorBoard from metrics dictionary."""
-        # Combined mappings for cleaner code
         all_mappings = {
             "loss": "Loss/Train",
             "recon": "Loss/Train/BCE",
@@ -966,7 +890,6 @@ class VAETrainer:
             "is_best": is_best,
         }
 
-        # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         torch.save(checkpoint, filepath)
 
@@ -986,7 +909,6 @@ class VAETrainer:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.global_step = checkpoint.get("global_step", 0)
 
-        # Load history into the TrainingHistory object
         train_history = checkpoint.get("train_history", {})
         val_history = checkpoint.get("val_history", {})
         train_step_history = checkpoint.get("train_step_history", {})
@@ -1006,10 +928,7 @@ class VAETrainer:
         import json
         from datetime import datetime
 
-        # Get model parameter count
         param_count = self._count_parameters()
-
-        # Prepare performance data
         performance_data = {
             "timestamp": datetime.now().isoformat(),
             "model_info": {
@@ -1050,10 +969,8 @@ class VAETrainer:
             },
         }
 
-        # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # Save to JSON
         with open(filepath, "w") as f:
             json.dump(performance_data, f, indent=2, default=str)
 
