@@ -14,23 +14,15 @@ from tqdm import tqdm
 
 from metrics import MetricsAccumulator, TrainingHistory
 from model import VAE
-from plotting import (
-    collect_all_latent_data,
-    compute_kl_per_dimension,
-    make_grouped_plot_path,
-    save_gradient_diagnostics,
-    save_interpolation_and_sweep_figures,
-    save_kl_diagnostics_separate,
-    save_latent_combined_figure,
-    save_latent_evolution_plots,
-    save_latent_marginals,
-    save_logvar_combined_figure,
-    save_logvar_marginals,
-    save_parameter_diagnostics,
-    save_recon_figure,
-    save_samples_figure,
-    save_training_curves,
-)
+from plotting import (collect_all_latent_data, compute_kl_per_dimension,
+                      make_grouped_plot_path, save_gradient_diagnostics,
+                      save_interpolation_and_sweep_figures,
+                      save_kl_diagnostics_separate,
+                      save_latent_combined_figure, save_latent_evolution_plots,
+                      save_latent_marginals, save_logvar_combined_figure,
+                      save_logvar_marginals, save_parameter_diagnostics,
+                      save_recon_figure, save_samples_figure,
+                      save_training_curves)
 from trainer_config import TrainerConfig
 
 ACTIVE_UNIT_KL_THRESHOLD = 0.1

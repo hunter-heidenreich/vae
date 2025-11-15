@@ -7,14 +7,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from .core import (
-    decode_samples,
-    figure_context,
-    grid_from_images,
-    model_inference,
-    save_figure,
-    split_plot_path,
-)
+from .core import (decode_samples, figure_context, grid_from_images,
+                   model_inference, save_figure, split_plot_path)
 
 if TYPE_CHECKING:
     from model import VAE
