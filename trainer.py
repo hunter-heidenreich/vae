@@ -17,7 +17,7 @@ from model import VAE
 from plotting import (
     collect_all_latent_data,
     compute_kl_per_dimension,
-    make_grouped_plot_path,
+    make_plot_path,
     save_gradient_diagnostics,
     save_interpolation_and_sweep_figures,
     save_kl_diagnostics_separate,
@@ -570,7 +570,7 @@ class VAETrainer:
             self.model,
             first_batch,
             self.device,
-            make_grouped_plot_path(self.fig_dir, "generation", "reconstructions"),
+            make_plot_path(self.fig_dir, "reconstructions", group="generation"),
             n=self.config.n_recon,
         )
 
@@ -578,7 +578,7 @@ class VAETrainer:
             self.model,
             self.device,
             self.model.config.latent_dim,
-            make_grouped_plot_path(self.fig_dir, "generation", "samples"),
+            make_plot_path(self.fig_dir, "samples", group="generation"),
             grid=DEFAULT_SAMPLES_GRID_SIZE,
         )
 
@@ -586,7 +586,7 @@ class VAETrainer:
             self.model,
             test_loader,
             self.device,
-            make_grouped_plot_path(self.fig_dir, "generation", "generation"),
+            make_plot_path(self.fig_dir, "generation", group="generation"),
             steps=self.config.interp_steps,
             method=self.config.interp_method,
             sweep_steps=DEFAULT_INTERPOLATION_SWEEP_STEPS,
@@ -604,22 +604,22 @@ class VAETrainer:
         save_latent_combined_figure(
             Z,
             Y,
-            make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "combined"),
+            make_plot_path(self.fig_dir, "latent", "combined", "latent_space"),
         )
         save_latent_marginals(
             Z,
-            make_grouped_plot_path(self.fig_dir, "latent_space", "latent", "marginals"),
+            make_plot_path(self.fig_dir, "latent", "marginals", "latent_space"),
         )
 
         LogVar = np.log(Std**2)
         save_logvar_combined_figure(
             LogVar,
             Y,
-            make_grouped_plot_path(self.fig_dir, "latent_space", "logvar", "combined"),
+            make_plot_path(self.fig_dir, "logvar", "combined", "latent_space"),
         )
         save_logvar_marginals(
             LogVar,
-            make_grouped_plot_path(self.fig_dir, "latent_space", "logvar", "marginals"),
+            make_plot_path(self.fig_dir, "logvar", "marginals", "latent_space"),
         )
 
         print(f"Analysis plots saved to {self.fig_dir}")

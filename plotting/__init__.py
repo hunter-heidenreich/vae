@@ -1,8 +1,11 @@
+from . import constants
 from .core import (
+    add_best_epoch_marker,
+    compute_histogram_bins,
     decode_samples,
+    extract_history_data,
     figure_context,
     grid_from_images,
-    make_grouped_plot_path,
     make_plot_path,
     model_inference,
     save_figure,
@@ -37,15 +40,18 @@ from .parameter_diagnostics import save_parameter_diagnostics
 from .training_curves import save_training_curves
 
 __all__ = [
+    "constants",
     "model_inference",
     "figure_context",
     "subplot_context",
     "save_figure",
     "make_plot_path",
-    "make_grouped_plot_path",
     "split_plot_path",
+    "add_best_epoch_marker",
     "decode_samples",
     "grid_from_images",
+    "extract_history_data",
+    "compute_histogram_bins",
     "collect_latents",
     "collect_latents_with_std",
     "collect_all_latent_data",

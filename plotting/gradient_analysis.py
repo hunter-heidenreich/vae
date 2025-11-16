@@ -5,82 +5,27 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import make_grouped_plot_path, save_figure
-
-# Styling constants
-EPOCH_FIGURE_SIZE = (12, 8)
-STEP_FIGURE_SIZE = (14, 8)
-EPOCH_MARKER_SIZE = 3
-STEP_MARKER_SIZE = 2
-GRID_ALPHA = 0.3
-BEST_EPOCH_MARKER_SIZE = 150
-BEST_EPOCH_MARKER_ALPHA = 0.9
-
-# Color scheme
-COLOR_RECON = "blue"
-COLOR_KL = "red"
-COLOR_REALIZED = "green"
-COLOR_UNCLIPPED = "gray"
-COLOR_COSINE = "purple"
-COLOR_ENCODER = "blue"
-COLOR_DECODER = "orange"
-COLOR_TOTAL_ENCODER = "purple"
-COLOR_TOTAL_DECODER = "green"
-
-
-def _validate_history_keys(history: dict, required_keys: list[str], name: str) -> bool:
-    """Validate that history contains all required keys with non-empty data.
-
-    Args:
-        history: History dictionary to validate
-        required_keys: List of required key names
-        name: Name of the diagnostic for error message
-
-    Returns:
-        True if valid, False otherwise
-    """
-    missing_keys = [key for key in required_keys if not history.get(key)]
-    if missing_keys:
-        print(f"Skipping {name}: Missing keys {missing_keys}")
-        return False
-    return True
-
-
-def _configure_common_axis(
-    ax, title: str, xlabel: str, ylabel: str, use_log: bool = False
-):
-    """Apply common axis configuration."""
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.legend()
-    ax.grid(True, alpha=GRID_ALPHA)
-    if use_log:
-        ax.set_yscale("log")
-
-
-def _add_best_epoch_marker(
-    ax,
-    epochs: np.ndarray,
-    values: np.ndarray,
-    best_epoch: Optional[int],
-    label_prefix: str = "Best",
-):
-    """Add a marker for the best epoch on a plot."""
-    if best_epoch is not None and best_epoch in epochs:
-        best_idx = np.where(epochs == best_epoch)[0][0]
-        ax.scatter(
-            epochs[best_idx],
-            values[best_idx],
-            marker="*",
-            s=BEST_EPOCH_MARKER_SIZE,
-            color="gold",
-            edgecolor="darkorange",
-            linewidth=1.5,
-            alpha=BEST_EPOCH_MARKER_ALPHA,
-            zorder=10,
-            label=f"{label_prefix} (Epoch {int(best_epoch)})",
-        )
+from .constants import (
+    COLOR_COSINE,
+    COLOR_DECODER,
+    COLOR_ENCODER,
+    COLOR_KL,
+    COLOR_REALIZED,
+    COLOR_TOTAL_DECODER,
+    COLOR_TOTAL_ENCODER,
+    COLOR_UNCLIPPED,
+    FIGURE_SIZE_STANDARD,
+    FIGURE_SIZE_WIDE,
+    GRID_ALPHA,
+    MARKER_SIZE_MEDIUM,
+    MARKER_SIZE_SMALL,
+)
+from .core import (
+    add_best_epoch_marker,
+    extract_history_data,
+    make_plot_path,
+    save_figure,
+)
 
 
 def save_gradient_diagnostics(
@@ -88,15 +33,10 @@ def save_gradient_diagnostics(
     train_step_history: dict,
     fig_dir: str,
     best_epoch: Optional[int] = None,
-):
-    """Save separate gradient diagnostic plots for epoch and step level data."""
-    # Save epoch-level gradient diagnostics
+) -> None:
     _save_epoch_gradient_diagnostics(train_history, fig_dir, best_epoch)
-
-    # Save enhanced encoder/decoder gradient diagnostics
     _save_encoder_decoder_gradient_diagnostics(train_history, fig_dir, best_epoch)
 
-    # Save step-level gradient diagnostics if available
     if train_step_history and train_step_history.get("step"):
         _save_step_gradient_diagnostics(train_step_history, fig_dir)
         _save_step_encoder_decoder_gradient_diagnostics(train_step_history, fig_dir)
@@ -104,8 +44,7 @@ def save_gradient_diagnostics(
 
 def _save_epoch_gradient_diagnostics(
     train_history: dict, fig_dir: str, best_epoch: Optional[int] = None
-):
-    """Save epoch-level gradient diagnostics as separate plots."""
+) -> None:
     required_keys = [
         "epoch",
         "recon_grad_norm",
@@ -117,28 +56,44 @@ def _save_epoch_gradient_diagnostics(
         "kl_contrib",
     ]
 
-    if not _validate_history_keys(
-        train_history, required_keys, "epoch gradient diagnostics"
-    ):
+    if not all(train_history.get(k) for k in required_keys):
         return
 
-    x_values = np.asarray(train_history["epoch"], dtype=float)
+    (
+        x_values,
+        recon_norm,
+        kl_norm,
+        realized_norm,
+        unclipped_norm,
+        recon_kl_cosine,
+        recon_contrib,
+        kl_contrib,
+    ) = extract_history_data(
+        train_history,
+        "epoch",
+        "recon_grad_norm",
+        "kl_grad_norm",
+        "grad_norm_realized",
+        "grad_norm_unclipped",
+        "recon_kl_cosine",
+        "recon_contrib",
+        "kl_contrib",
+    )
+
     if len(x_values) == 0:
         return
 
-    # Load data
     data = {
-        "recon_norm": np.asarray(train_history["recon_grad_norm"]),
-        "kl_norm": np.asarray(train_history["kl_grad_norm"]),
-        "realized_norm": np.asarray(train_history["grad_norm_realized"]),
-        "unclipped_norm": np.asarray(train_history["grad_norm_unclipped"]),
-        "recon_kl_cosine": np.asarray(train_history["recon_kl_cosine"]),
-        "recon_contrib": np.asarray(train_history["recon_contrib"]),
-        "kl_contrib": np.asarray(train_history["kl_contrib"]),
+        "recon_norm": recon_norm,
+        "kl_norm": kl_norm,
+        "realized_norm": realized_norm,
+        "unclipped_norm": unclipped_norm,
+        "recon_kl_cosine": recon_kl_cosine,
+        "recon_contrib": recon_contrib,
+        "kl_contrib": kl_contrib,
     }
 
-    # 1. Gradient Norms
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_gradient_norms(
         ax,
         x_values,
@@ -147,40 +102,35 @@ def _save_epoch_gradient_diagnostics(
         data["realized_norm"],
         data["unclipped_norm"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    _add_best_epoch_marker(
-        ax, x_values, data["realized_norm"], best_epoch, "Best Model"
-    )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "norms", "epochs"))
+    add_best_epoch_marker(ax, x_values, data["realized_norm"], best_epoch, "Best Model")
+    save_figure(make_plot_path(fig_dir, "norms", "epochs", "gradients"))
     plt.close()
 
-    # 2. Gradient Alignment
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_gradient_alignment(
-        ax, x_values, data["recon_kl_cosine"], "Epoch", EPOCH_MARKER_SIZE
+        ax, x_values, data["recon_kl_cosine"], "Epoch", MARKER_SIZE_MEDIUM
     )
-    _add_best_epoch_marker(
+    add_best_epoch_marker(
         ax, x_values, data["recon_kl_cosine"], best_epoch, "Best Model"
     )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "alignment", "epochs"))
+    save_figure(make_plot_path(fig_dir, "alignment", "epochs", "gradients"))
     plt.close()
 
-    # 3. Gradient Contributions
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_gradient_contributions(
         ax,
         x_values,
         data["recon_contrib"],
         data["kl_contrib"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "contributions", "epochs"))
+    save_figure(make_plot_path(fig_dir, "contributions", "epochs", "gradients"))
     plt.close()
 
-    # 4. Effective Magnitudes
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_effective_magnitudes(
         ax,
         x_values,
@@ -188,16 +138,13 @@ def _save_epoch_gradient_diagnostics(
         data["recon_contrib"],
         data["kl_contrib"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "effective_magnitudes", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "effective_magnitudes", "epochs", "gradients"))
     plt.close()
 
 
-def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
-    """Save step-level gradient diagnostics as separate plots."""
+def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str) -> None:
     required_keys = [
         "step",
         "recon_grad_norm",
@@ -209,16 +156,13 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
         "kl_contrib",
     ]
 
-    if not _validate_history_keys(
-        train_step_history, required_keys, "step gradient diagnostics"
-    ):
+    if not all(train_step_history.get(k) for k in required_keys):
         return
 
     x_values = np.asarray(train_step_history["step"], dtype=float)
     if len(x_values) == 0:
         return
 
-    # Load data
     data = {
         "recon_norm": np.asarray(train_step_history["recon_grad_norm"]),
         "kl_norm": np.asarray(train_step_history["kl_grad_norm"]),
@@ -229,8 +173,7 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
         "kl_contrib": np.asarray(train_step_history["kl_contrib"]),
     }
 
-    # 1. Step Gradient Norms
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_gradient_norms(
         ax,
         x_values,
@@ -239,34 +182,31 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
         data["realized_norm"],
         data["unclipped_norm"],
         "Training Step",
-        STEP_MARKER_SIZE,
+        MARKER_SIZE_SMALL,
     )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "norms", "steps"))
+    save_figure(make_plot_path(fig_dir, "norms", "steps", "gradients"))
     plt.close()
 
-    # 2. Step Gradient Alignment
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_gradient_alignment(
-        ax, x_values, data["recon_kl_cosine"], "Training Step", STEP_MARKER_SIZE
+        ax, x_values, data["recon_kl_cosine"], "Training Step", MARKER_SIZE_SMALL
     )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "alignment", "steps"))
+    save_figure(make_plot_path(fig_dir, "alignment", "steps", "gradients"))
     plt.close()
 
-    # 3. Step Gradient Contributions
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_gradient_contributions(
         ax,
         x_values,
         data["recon_contrib"],
         data["kl_contrib"],
         "Training Step",
-        STEP_MARKER_SIZE,
+        MARKER_SIZE_SMALL,
     )
-    save_figure(make_grouped_plot_path(fig_dir, "gradients", "contributions", "steps"))
+    save_figure(make_plot_path(fig_dir, "contributions", "steps", "gradients"))
     plt.close()
 
-    # 4. Step Effective Magnitudes
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_effective_magnitudes(
         ax,
         x_values,
@@ -274,15 +214,12 @@ def _save_step_gradient_diagnostics(train_step_history: dict, fig_dir: str):
         data["recon_contrib"],
         data["kl_contrib"],
         "Training Step",
-        STEP_MARKER_SIZE,
+        MARKER_SIZE_SMALL,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "effective_magnitudes", "steps")
-    )
+    save_figure(make_plot_path(fig_dir, "effective_magnitudes", "steps", "gradients"))
     plt.close()
 
 
-# Consolidated plotting functions (work for both epoch and step level)
 def _plot_gradient_norms(
     ax,
     x_values: np.ndarray,
@@ -292,8 +229,7 @@ def _plot_gradient_norms(
     unclipped_norm: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot gradient norms."""
+) -> None:
     ax.plot(
         x_values,
         recon_norm,
@@ -301,7 +237,7 @@ def _plot_gradient_norms(
         label="Recon Norm",
         markersize=marker_size,
         alpha=0.8,
-        color=COLOR_RECON,
+        color=COLOR_ENCODER,
     )
     ax.plot(
         x_values,
@@ -322,7 +258,6 @@ def _plot_gradient_norms(
         color=COLOR_REALIZED,
     )
 
-    # Show unclipped norm only if clipping occurred
     if np.any(unclipped_norm != realized_norm):
         ax.plot(
             x_values,
@@ -333,13 +268,17 @@ def _plot_gradient_norms(
             color=COLOR_UNCLIPPED,
         )
 
-    _configure_common_axis(ax, "Gradient L2 Norms", xlabel, "L2 Norm", use_log=True)
+    ax.set_title("Gradient L2 Norms")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("L2 Norm")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_gradient_alignment(
     ax, x_values: np.ndarray, recon_kl_cosine: np.ndarray, xlabel: str, marker_size: int
-):
-    """Plot gradient alignment (cosine similarity)."""
+) -> None:
     ax.plot(
         x_values,
         recon_kl_cosine,
@@ -352,7 +291,11 @@ def _plot_gradient_alignment(
     ax.axhline(y=-1, color="gray", linestyle="--", alpha=0.7, label="Opposite")
     ax.axhline(y=1, color="gray", linestyle="--", alpha=0.7, label="Aligned")
     ax.set_ylim([-1.1, 1.1])
-    _configure_common_axis(ax, "Gradient Alignment", xlabel, "Cosine Similarity")
+    ax.set_title("Gradient Alignment")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Cosine Similarity")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_gradient_contributions(
@@ -362,8 +305,7 @@ def _plot_gradient_contributions(
     kl_contrib: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot relative gradient contributions."""
+) -> None:
     ax.plot(
         x_values,
         recon_contrib,
@@ -371,7 +313,7 @@ def _plot_gradient_contributions(
         label="Recon Contribution",
         markersize=marker_size,
         alpha=0.8,
-        color=COLOR_RECON,
+        color=COLOR_ENCODER,
     )
     ax.plot(
         x_values,
@@ -385,9 +327,11 @@ def _plot_gradient_contributions(
     ax.axhline(y=0.5, color="gray", linestyle="--", alpha=0.7, label="Balanced")
     ax.axhline(y=1.0, color="black", linestyle="-", alpha=0.5)
     ax.axhline(y=0.0, color="black", linestyle="-", alpha=0.5)
-    _configure_common_axis(
-        ax, "Gradient Contributions", xlabel, "Normalized Contribution"
-    )
+    ax.set_title("Gradient Contributions")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Normalized Contribution")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_effective_magnitudes(
@@ -398,8 +342,7 @@ def _plot_effective_magnitudes(
     kl_contrib: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot effective gradient magnitudes."""
+) -> None:
     effective_recon = realized_norm * recon_contrib
     effective_kl = realized_norm * kl_contrib
     ax.plot(
@@ -409,7 +352,7 @@ def _plot_effective_magnitudes(
         label="Effective Recon",
         markersize=marker_size,
         alpha=0.8,
-        color=COLOR_RECON,
+        color=COLOR_ENCODER,
     )
     ax.plot(
         x_values,
@@ -420,15 +363,16 @@ def _plot_effective_magnitudes(
         alpha=0.8,
         color=COLOR_KL,
     )
-    _configure_common_axis(
-        ax, "Effective Gradient Magnitudes", xlabel, "Effective L2 Magnitude"
-    )
+    ax.set_title("Effective Gradient Magnitudes")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Effective L2 Magnitude")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _save_encoder_decoder_gradient_diagnostics(
     train_history: dict, fig_dir: str, best_epoch: Optional[int] = None
-):
-    """Save encoder/decoder-specific gradient diagnostics."""
+) -> None:
     required_keys = [
         "epoch",
         "recon_encoder_grad_norm",
@@ -442,16 +386,13 @@ def _save_encoder_decoder_gradient_diagnostics(
         "kl_encoder_contrib",
     ]
 
-    if not _validate_history_keys(
-        train_history, required_keys, "encoder/decoder gradient diagnostics"
-    ):
+    if not all(train_history.get(k) for k in required_keys):
         return
 
     x_values = np.asarray(train_history["epoch"], dtype=float)
     if len(x_values) == 0:
         return
 
-    # Load encoder/decoder data
     data = {
         "recon_encoder": np.asarray(train_history["recon_encoder_grad_norm"]),
         "recon_decoder": np.asarray(train_history["recon_decoder_grad_norm"]),
@@ -464,48 +405,43 @@ def _save_encoder_decoder_gradient_diagnostics(
         "kl_encoder_contrib": np.asarray(train_history["kl_encoder_contrib"]),
     }
 
-    # 1. Encoder vs Decoder Reconstruction Gradients
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_encoder_decoder_recon_gradients(
         ax,
         x_values,
         data["recon_encoder"],
         data["recon_decoder"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "encoder_decoder_recon", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "encoder_decoder_recon", "epochs", "gradients"))
     plt.close()
 
-    # 2. KL Gradients (encoder-only in VAE)
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_kl_gradient_distribution(
-        ax, x_values, data["kl_encoder"], data["kl_decoder"], "Epoch", EPOCH_MARKER_SIZE
+        ax,
+        x_values,
+        data["kl_encoder"],
+        data["kl_decoder"],
+        "Epoch",
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "kl_distribution", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "kl_distribution", "epochs", "gradients"))
     plt.close()
 
-    # 3. Total Gradients by Component
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_total_gradients_by_component(
         ax,
         x_values,
         data["total_encoder"],
         data["total_decoder"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "total_by_component", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "total_by_component", "epochs", "gradients"))
     plt.close()
 
-    # 4. Encoder-specific Analysis
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_encoder_gradient_analysis(
         ax,
         x_values,
@@ -515,18 +451,15 @@ def _save_encoder_decoder_gradient_diagnostics(
         data["recon_encoder_contrib"],
         data["kl_encoder_contrib"],
         "Epoch",
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "encoder_analysis", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "encoder_analysis", "epochs", "gradients"))
     plt.close()
 
 
 def _save_step_encoder_decoder_gradient_diagnostics(
     train_step_history: dict, fig_dir: str
-):
-    """Save step-level encoder/decoder-specific gradient diagnostics."""
+) -> None:
     required_keys = [
         "step",
         "recon_encoder_grad_norm",
@@ -535,18 +468,13 @@ def _save_step_encoder_decoder_gradient_diagnostics(
         "total_decoder_grad_norm",
     ]
 
-    if not _validate_history_keys(
-        train_step_history,
-        required_keys,
-        "step-level encoder/decoder gradient diagnostics",
-    ):
+    if not all(train_step_history.get(k) for k in required_keys):
         return
 
     x_values = np.asarray(train_step_history["step"], dtype=float)
     if len(x_values) == 0:
         return
 
-    # Load encoder/decoder data
     data = {
         "recon_encoder": np.asarray(train_step_history["recon_encoder_grad_norm"]),
         "recon_decoder": np.asarray(train_step_history["recon_decoder_grad_norm"]),
@@ -554,38 +482,31 @@ def _save_step_encoder_decoder_gradient_diagnostics(
         "total_decoder": np.asarray(train_step_history["total_decoder_grad_norm"]),
     }
 
-    # 1. Step-level Encoder vs Decoder Reconstruction Gradients
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_encoder_decoder_recon_gradients(
         ax,
         x_values,
         data["recon_encoder"],
         data["recon_decoder"],
         "Training Step",
-        STEP_MARKER_SIZE,
+        MARKER_SIZE_SMALL,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "encoder_decoder_recon", "steps")
-    )
+    save_figure(make_plot_path(fig_dir, "encoder_decoder_recon", "steps", "gradients"))
     plt.close()
 
-    # 2. Step-level Total Gradients by Component
-    fig, ax = plt.subplots(figsize=STEP_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_WIDE)
     _plot_total_gradients_by_component(
         ax,
         x_values,
         data["total_encoder"],
         data["total_decoder"],
         "Training Step",
-        STEP_MARKER_SIZE,
+        MARKER_SIZE_SMALL,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "gradients", "total_by_component", "steps")
-    )
+    save_figure(make_plot_path(fig_dir, "total_by_component", "steps", "gradients"))
     plt.close()
 
 
-# Encoder/Decoder plotting functions
 def _plot_encoder_decoder_recon_gradients(
     ax,
     x_values: np.ndarray,
@@ -593,8 +514,7 @@ def _plot_encoder_decoder_recon_gradients(
     recon_decoder: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot reconstruction gradients for encoder vs decoder."""
+) -> None:
     ax.plot(
         x_values,
         recon_encoder,
@@ -613,13 +533,12 @@ def _plot_encoder_decoder_recon_gradients(
         alpha=0.8,
         color=COLOR_DECODER,
     )
-    _configure_common_axis(
-        ax,
-        "Reconstruction Gradients: Encoder vs Decoder",
-        xlabel,
-        "L2 Norm",
-        use_log=True,
-    )
+    ax.set_title("Reconstruction Gradients: Encoder vs Decoder")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("L2 Norm")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_kl_gradient_distribution(
@@ -629,8 +548,7 @@ def _plot_kl_gradient_distribution(
     kl_decoder: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot KL gradient distribution (decoder should be near zero)."""
+) -> None:
     ax.plot(
         x_values,
         kl_encoder,
@@ -649,9 +567,12 @@ def _plot_kl_gradient_distribution(
         alpha=0.8,
         color=COLOR_UNCLIPPED,
     )
-    _configure_common_axis(
-        ax, "KL Gradient Distribution", xlabel, "L2 Norm", use_log=True
-    )
+    ax.set_title("KL Gradient Distribution")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("L2 Norm")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_total_gradients_by_component(
@@ -661,8 +582,7 @@ def _plot_total_gradients_by_component(
     total_decoder: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot total gradients by encoder/decoder component."""
+) -> None:
     ax.plot(
         x_values,
         total_encoder,
@@ -681,9 +601,12 @@ def _plot_total_gradients_by_component(
         alpha=0.8,
         color=COLOR_TOTAL_DECODER,
     )
-    _configure_common_axis(
-        ax, "Total Gradients by Component", xlabel, "L2 Norm", use_log=True
-    )
+    ax.set_title("Total Gradients by Component")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("L2 Norm")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_encoder_gradient_analysis(
@@ -696,11 +619,8 @@ def _plot_encoder_gradient_analysis(
     kl_encoder_contrib: np.ndarray,
     xlabel: str,
     marker_size: int,
-):
-    """Plot encoder-specific gradient analysis with dual y-axes."""
+) -> None:
     ax2 = ax.twinx()
-
-    # Plot gradient norms on main axis
     ax.plot(
         x_values,
         recon_encoder,
@@ -723,7 +643,6 @@ def _plot_encoder_gradient_analysis(
     ax.set_yscale("log")
     ax.legend(loc="upper left")
 
-    # Plot cosine similarity on secondary axis
     ax2.plot(
         x_values,
         recon_kl_encoder_cosine,

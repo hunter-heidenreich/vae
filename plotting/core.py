@@ -2,18 +2,45 @@
 
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from model import VAE
 
-# Constants
+from .constants import (
+    ALPHA_HIGH,
+    COLOR_BEST,
+    COLOR_BEST_EDGE,
+    MARKER_SIZE_HIGHLIGHT,
+    ZORDER_HIGHLIGHT,
+)
+
 MNIST_SHAPE = (1, 28, 28)
 DEFAULT_DPI = 200
 DEFAULT_FORMAT = "webp"
-DEFAULT_CMAP = "tab10"
-DEFAULT_ALPHA = 0.8
+
+
+def extract_history_data(history: dict, *keys: str) -> tuple:
+    return tuple(np.asarray(history[key], dtype=float) for key in keys)
+
+
+def compute_histogram_bins(data: np.ndarray) -> int:
+    """Compute optimal histogram bins using Freedman-Diaconis rule, fallback to Sturges."""
+    n = len(data)
+    q75, q25 = np.percentile(data, [75, 25])
+    iqr = q75 - q25
+
+    if iqr > 0:
+        bin_width = 2 * iqr / (n ** (1 / 3))
+        data_range = data.max() - data.min()
+        n_bins = int(np.ceil(data_range / bin_width)) if bin_width > 0 else 10
+    else:
+        n_bins = int(np.ceil(np.log2(n) + 1))
+
+    return max(10, min(n_bins, 100))
 
 
 @contextmanager
@@ -30,6 +57,7 @@ def figure_context(
     dpi: int = DEFAULT_DPI,
     format: str = DEFAULT_FORMAT,
 ):
+    """Context manager for creating and saving a figure."""
     plt.figure(figsize=figsize)
     try:
         yield
@@ -38,11 +66,29 @@ def figure_context(
         plt.close()
 
 
+@contextmanager
+def subplot_context(
+    figsize: tuple[float, float],
+    out_path: str,
+    dpi: int = DEFAULT_DPI,
+    format: str = DEFAULT_FORMAT,
+):
+    """Context manager for creating and saving a figure with subplots."""
+    fig = plt.figure(figsize=figsize)
+    try:
+        yield fig
+    finally:
+        save_figure(out_path, dpi=dpi, format=format)
+        plt.close()
+
+
 def decode_samples(model: VAE, z: torch.Tensor) -> torch.Tensor:
+    """Decode latent samples and reshape to MNIST image format."""
     return torch.sigmoid(model.decode(z)).view(-1, *MNIST_SHAPE)
 
 
 def grid_from_images(imgs: torch.Tensor, nrow: int, ncol: int) -> torch.Tensor:
+    """Arrange images in a grid for visualization."""
     imgs = imgs.detach().cpu().clamp(0, 1)
     N, C, H, W = imgs.shape
     canvas = torch.zeros((C, nrow * H, ncol * W))
@@ -65,10 +111,10 @@ def save_figure(
     ensure_dir: bool = True,
     bbox_inches: str = "tight",
 ) -> None:
+    """Save the current matplotlib figure to a file."""
     path_obj = Path(out_path)
-    if format and not path_obj.suffix:
-        out_path = str(path_obj.with_suffix(f".{format}"))
-    elif format and path_obj.suffix != f".{format}":
+
+    if format and path_obj.suffix != f".{format}":
         out_path = str(path_obj.with_suffix(f".{format}"))
 
     if ensure_dir:
@@ -78,59 +124,44 @@ def save_figure(
     plt.savefig(out_path, dpi=dpi, format=format, bbox_inches=bbox_inches)
 
 
-@contextmanager
-def subplot_context(
-    figsize: tuple[float, float],
-    out_path: str,
-    dpi: int = DEFAULT_DPI,
-    format: str = DEFAULT_FORMAT,
-):
-    fig = plt.figure(figsize=figsize)
-    try:
-        yield fig
-    finally:
-        save_figure(out_path, dpi=dpi, format=format)
-        plt.close()
-
-
 def make_plot_path(
     fig_dir: str,
-    base_name: str,
+    name: str,
     suffix: str = "",
+    group: str = "",
     format: str = DEFAULT_FORMAT,
-    group_dir: str = "",
 ) -> str:
-    """Create a standardized plot file path with optional grouping."""
-    if suffix:
-        filename = f"{base_name}_{suffix}.{format}"
-    else:
-        filename = f"{base_name}.{format}"
-
-    base_path = Path(fig_dir)
-    if group_dir:
-        return str(base_path / group_dir / filename)
-    else:
-        return str(base_path / filename)
+    """Create a standardized plot file path."""
+    filename = f"{name}_{suffix}.{format}" if suffix else f"{name}.{format}"
+    path = Path(fig_dir) / group / filename if group else Path(fig_dir) / filename
+    return str(path)
 
 
 def split_plot_path(out_path: str, suffix: str) -> str:
-    """Create a related plot path by adding a suffix to the base name.
-
-    Example:
-        split_plot_path("/path/figures/interpolation.webp", "latent_sweep")
-        -> "/path/figures/interpolation_latent_sweep.webp"
-    """
+    """Create a related plot path by adding a suffix to the base name."""
     path_obj = Path(out_path)
-    base_name = path_obj.stem
-    new_name = f"{base_name}_{suffix}"
-    return str(path_obj.with_name(f"{new_name}{path_obj.suffix}"))
+    return str(path_obj.with_stem(f"{path_obj.stem}_{suffix}"))
 
 
-def make_grouped_plot_path(
-    fig_dir: str,
-    group: str,
-    base_name: str,
-    suffix: str = "",
-    format: str = DEFAULT_FORMAT,
-) -> str:
-    return make_plot_path(fig_dir, base_name, suffix, format, group_dir=group)
+def add_best_epoch_marker(
+    ax,
+    epochs: np.ndarray,
+    values: np.ndarray,
+    best_epoch: Optional[int],
+    label_prefix: str = "Best",
+) -> None:
+    """Add visual marker at best epoch location."""
+    if best_epoch is not None and best_epoch in epochs:
+        best_idx = np.where(epochs == best_epoch)[0][0]
+        ax.scatter(
+            epochs[best_idx],
+            values[best_idx],
+            marker="*",
+            s=MARKER_SIZE_HIGHLIGHT,
+            color=COLOR_BEST,
+            edgecolor=COLOR_BEST_EDGE,
+            linewidth=1.5,
+            alpha=ALPHA_HIGH,
+            zorder=ZORDER_HIGHLIGHT,
+            label=f"{label_prefix} (Epoch {int(best_epoch)})",
+        )

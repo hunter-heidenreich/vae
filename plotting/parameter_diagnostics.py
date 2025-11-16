@@ -5,74 +5,15 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import make_grouped_plot_path, save_figure
-
-# Styling constants
-EPOCH_FIGURE_SIZE = (12, 8)
-EPOCH_MARKER_SIZE = 3
-GRID_ALPHA = 0.3
-BEST_EPOCH_MARKER_SIZE = 150
-BEST_EPOCH_MARKER_ALPHA = 0.9
-
-# Color scheme
-COLOR_ENCODER = "blue"
-COLOR_DECODER = "orange"
-COLOR_TOTAL = "purple"
-
-
-def _validate_history_keys(history: dict, required_keys: list[str], name: str) -> bool:
-    """Validate that history contains all required keys with non-empty data.
-
-    Args:
-        history: History dictionary to validate
-        required_keys: List of required key names
-        name: Name of the diagnostic for error message
-
-    Returns:
-        True if valid, False otherwise
-    """
-    missing_keys = [key for key in required_keys if not history.get(key)]
-    if missing_keys:
-        print(f"Skipping {name}: Missing keys {missing_keys}")
-        return False
-    return True
-
-
-def _configure_common_axis(
-    ax, title: str, xlabel: str, ylabel: str, use_log: bool = False
-):
-    """Apply common axis configuration."""
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.legend()
-    ax.grid(True, alpha=GRID_ALPHA)
-    if use_log:
-        ax.set_yscale("log")
-
-
-def _add_best_epoch_marker(
-    ax,
-    epochs: np.ndarray,
-    values: np.ndarray,
-    best_epoch: Optional[int],
-    label_prefix: str = "Best",
-):
-    """Add a marker for the best epoch on a plot."""
-    if best_epoch is not None and best_epoch in epochs:
-        best_idx = np.where(epochs == best_epoch)[0][0]
-        ax.scatter(
-            epochs[best_idx],
-            values[best_idx],
-            marker="*",
-            s=BEST_EPOCH_MARKER_SIZE,
-            color="gold",
-            edgecolor="darkorange",
-            linewidth=1.5,
-            alpha=BEST_EPOCH_MARKER_ALPHA,
-            zorder=10,
-            label=f"{label_prefix} (Epoch {int(best_epoch)})",
-        )
+from .constants import (
+    COLOR_DECODER,
+    COLOR_ENCODER,
+    COLOR_TOTAL,
+    FIGURE_SIZE_STANDARD,
+    GRID_ALPHA,
+    MARKER_SIZE_MEDIUM,
+)
+from .core import add_best_epoch_marker, make_plot_path, save_figure
 
 
 def save_parameter_diagnostics(
@@ -80,8 +21,7 @@ def save_parameter_diagnostics(
     val_history: dict,
     fig_dir: str,
     best_epoch: Optional[int] = None,
-):
-    """Save parameter magnitude and change diagnostics."""
+) -> None:
     _save_parameter_norm_diagnostics(train_history, val_history, fig_dir, best_epoch)
     _save_parameter_change_diagnostics(train_history, fig_dir, best_epoch)
 
@@ -91,8 +31,7 @@ def _save_parameter_norm_diagnostics(
     val_history: dict,
     fig_dir: str,
     best_epoch: Optional[int] = None,
-):
-    """Save parameter norm diagnostics using validation data if available."""
+) -> None:
     required_keys = [
         "epoch",
         "encoder_param_norm",
@@ -100,15 +39,12 @@ def _save_parameter_norm_diagnostics(
         "total_param_norm",
     ]
 
-    # Check both histories
     train_has_params = all(train_history.get(key) for key in required_keys)
     val_has_params = all(val_history.get(key) for key in required_keys)
 
     if not (train_has_params or val_has_params):
-        print(f"Skipping parameter norm diagnostics: Missing keys {required_keys}")
         return
 
-    # Prefer validation data (cleaner, no training noise)
     history_to_use = val_history if val_has_params else train_history
     data_source = "validation" if val_has_params else "training"
 
@@ -122,7 +58,7 @@ def _save_parameter_norm_diagnostics(
         "total_norm": np.asarray(history_to_use["total_param_norm"]),
     }
 
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_parameter_norms(
         ax,
         x_values,
@@ -130,17 +66,16 @@ def _save_parameter_norm_diagnostics(
         data["decoder_norm"],
         data["total_norm"],
         data_source,
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    _add_best_epoch_marker(ax, x_values, data["total_norm"], best_epoch, "Best Model")
-    save_figure(make_grouped_plot_path(fig_dir, "parameters", "norms", "epochs"))
+    add_best_epoch_marker(ax, x_values, data["total_norm"], best_epoch, "Best Model")
+    save_figure(make_plot_path(fig_dir, "norms", "epochs", "parameters"))
     plt.close()
 
 
 def _save_parameter_change_diagnostics(
     train_history: dict, fig_dir: str, best_epoch: Optional[int] = None
-):
-    """Save parameter change diagnostics (training data only)."""
+) -> None:
     required_keys = [
         "epoch",
         "encoder_param_change_norm",
@@ -151,16 +86,13 @@ def _save_parameter_change_diagnostics(
         "total_param_change_rel",
     ]
 
-    if not _validate_history_keys(
-        train_history, required_keys, "parameter change diagnostics"
-    ):
+    if not all(train_history.get(k) for k in required_keys):
         return
 
     x_values = np.asarray(train_history["epoch"], dtype=float)
     if len(x_values) == 0:
         return
 
-    # Load absolute and relative changes
     data = {
         "encoder_change_norm": np.asarray(train_history["encoder_param_change_norm"]),
         "decoder_change_norm": np.asarray(train_history["decoder_param_change_norm"]),
@@ -170,34 +102,28 @@ def _save_parameter_change_diagnostics(
         "total_change_rel": np.asarray(train_history["total_param_change_rel"]),
     }
 
-    # 1. Absolute Parameter Changes
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_parameter_changes_absolute(
         ax,
         x_values,
         data["encoder_change_norm"],
         data["decoder_change_norm"],
         data["total_change_norm"],
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "parameters", "changes_absolute", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "changes_absolute", "epochs", "parameters"))
     plt.close()
 
-    # 2. Relative Parameter Changes
-    fig, ax = plt.subplots(figsize=EPOCH_FIGURE_SIZE)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE_STANDARD)
     _plot_parameter_changes_relative(
         ax,
         x_values,
         data["encoder_change_rel"],
         data["decoder_change_rel"],
         data["total_change_rel"],
-        EPOCH_MARKER_SIZE,
+        MARKER_SIZE_MEDIUM,
     )
-    save_figure(
-        make_grouped_plot_path(fig_dir, "parameters", "changes_relative", "epochs")
-    )
+    save_figure(make_plot_path(fig_dir, "changes_relative", "epochs", "parameters"))
     plt.close()
 
 
@@ -209,8 +135,7 @@ def _plot_parameter_norms(
     total_norm: np.ndarray,
     data_source: str,
     marker_size: int,
-):
-    """Plot parameter norms over time."""
+) -> None:
     ax.plot(
         x_values,
         encoder_norm,
@@ -238,9 +163,12 @@ def _plot_parameter_norms(
         alpha=0.8,
         color=COLOR_TOTAL,
     )
-    _configure_common_axis(
-        ax, f"Parameter L2 Norms ({data_source})", "Epoch", "L2 Norm", use_log=True
-    )
+    ax.set_title(f"Parameter L2 Norms ({data_source})")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("L2 Norm")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_parameter_changes_absolute(
@@ -250,8 +178,7 @@ def _plot_parameter_changes_absolute(
     decoder_change_norm: np.ndarray,
     total_change_norm: np.ndarray,
     marker_size: int,
-):
-    """Plot absolute parameter changes over epochs."""
+) -> None:
     ax.plot(
         x_values,
         encoder_change_norm,
@@ -279,9 +206,12 @@ def _plot_parameter_changes_absolute(
         alpha=0.8,
         color=COLOR_TOTAL,
     )
-    _configure_common_axis(
-        ax, "Absolute Parameter Changes", "Epoch", "L2 Norm of Change", use_log=True
-    )
+    ax.set_title("Absolute Parameter Changes")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("L2 Norm of Change")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
 
 
 def _plot_parameter_changes_relative(
@@ -291,8 +221,7 @@ def _plot_parameter_changes_relative(
     decoder_change_rel: np.ndarray,
     total_change_rel: np.ndarray,
     marker_size: int,
-):
-    """Plot relative parameter changes over epochs."""
+) -> None:
     ax.plot(
         x_values,
         encoder_change_rel,
@@ -320,6 +249,8 @@ def _plot_parameter_changes_relative(
         alpha=0.8,
         color=COLOR_TOTAL,
     )
-    _configure_common_axis(
-        ax, "Relative Parameter Changes", "Epoch", "Relative Change (Δ / Current)"
-    )
+    ax.set_title("Relative Parameter Changes")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Relative Change (Δ / Current)")
+    ax.legend()
+    ax.grid(True, alpha=GRID_ALPHA)
